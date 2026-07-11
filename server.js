@@ -174,7 +174,7 @@ const server = http.createServer(async (req,res)=>{
 
 async function start() {
   await query('SELECT 1');
-  server.listen(PORT,()=>console.log(`Market Workbench: http://localhost:${PORT}`));
+  server.listen(PORT,'0.0.0.0',()=>console.log(`Market Workbench: http://localhost:${PORT}`));
 }
 
 async function shutdown() {
