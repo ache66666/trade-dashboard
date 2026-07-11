@@ -3,6 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "description": "交易员市场数据工作台",
-  "scripts": { "start": "node server.js", "test": "node --test" },
-  "engines": { "node": ">=22.5" }
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
 }

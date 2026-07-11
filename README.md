@@ -1,14 +1,33 @@
 # 市场数据工作台
 
-双击 `start.cmd`，然后浏览器打开 `http://localhost:4173`。
+网页运行时使用 Supabase PostgreSQL，所有查询、编辑和刷新结果都持久保存到云端数据库。`data/market.db` 仅作为迁移前的本地备份，不再参与应用运行。
 
-也可以在已安装 Node.js 22.5+ 的终端运行：
+## 本地启动
 
-```powershell
-npm start
+需要 Node.js 22.5+。安装依赖后，从 `.env.example` 创建 `.env` 并填写 Supabase Session pooler 的连接地址：
+
+```env
+DATABASE_URL=postgresql://...
 ```
 
-数据保存在 `data/market.db`（SQLite）中。首次启动会自动建库并填充示例数据。网页“数据维护”页中的编辑和新增会直接写入数据库。
+真实连接地址只能保存在 `.env` 或部署平台的 Secret/Environment Variables 中，不得提交到 Git。
+
+启动服务：
+
+```powershell
+pnpm install
+pnpm start
+```
+
+然后访问 `http://localhost:4173`。部署平台通常会自动提供 `PORT`。
+
+## 数据库初始化与迁移
+
+- `sql/001_initial_schema.sql`：Supabase PostgreSQL 表、约束和索引。
+- `scripts/migrate-sqlite-to-postgres.js`：一次性 SQLite → PostgreSQL 迁移工具。
+- `data/market.db`：只读备份，不再是运行时数据源。
+
+应用启动时只检查 PostgreSQL 连接，不会自动建表、写入示例数据或覆盖现有数据。数据库初始化和一次性迁移需要显式执行。
 
 ## 功能
 
