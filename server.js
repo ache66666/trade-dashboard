@@ -143,6 +143,7 @@ const server = http.createServer(async (req,res)=>{
       return json(res,200,result.rows.map(apiRow));
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
+      console.log(`[api] events GET t=${url.searchParams.get('t') || 'none'}`);
       const result = await query('SELECT * FROM macro_events ORDER BY event_time');
       return json(res,200,result.rows.map(apiRow));
     }
