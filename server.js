@@ -141,6 +141,16 @@ async function refreshAll() {
 const server = http.createServer(async (req,res)=>{
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
+    if (url.pathname === '/api/ping-text' && req.method === 'GET') {
+      const buffer = Buffer.from('ok', 'utf8');
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Connection', 'close');
+      res.shouldKeepAlive = false;
+      return res.end(buffer);
+    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       try {
         await query('SELECT 1');
