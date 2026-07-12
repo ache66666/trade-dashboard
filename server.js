@@ -141,16 +141,6 @@ async function refreshAll() {
 const server = http.createServer(async (req,res)=>{
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
-    if (url.pathname === '/api/ping-text' && req.method === 'GET') {
-      const buffer = Buffer.from('ok', 'utf8');
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Content-Length', buffer.length);
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      res.setHeader('Connection', 'close');
-      res.shouldKeepAlive = false;
-      return res.end(buffer);
-    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       try {
         await query('SELECT 1');
@@ -209,7 +199,6 @@ const server = http.createServer(async (req,res)=>{
     const requested=url.pathname==='/'?'index.html':url.pathname.slice(1);
     const file=path.normalize(path.join(ROOT,'public',requested));
     const exists=fs.existsSync(file);
-    console.log(`[static] pathname=${url.pathname} file=${file} exists=${exists}`);
     if(!file.startsWith(path.join(ROOT,'public'))) {res.writeHead(403);return res.end();}
     if(!exists||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};

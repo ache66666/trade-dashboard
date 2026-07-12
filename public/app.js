@@ -1,45 +1,377 @@
-const CATEGORIES=['流动性','利率','国债期货','外汇','股票','商品','波动率','信用','宏观日历'];
-const OVERVIEW_GROUPS=[
-  {name:'Rates',label:'利率',detail:'利率',symbols:['DR007','CN10Y','US10Y','T.CFE']},
-  {name:'FX',label:'外汇',detail:'外汇',symbols:['DXY','USDCNY','USDJPY','EURUSD']},
-  {name:'Equity',label:'权益',detail:'股票',symbols:['CSI300','HSTECH','SPX','NDX']},
-  {name:'Commodity',label:'商品',detail:'商品',symbols:['GOLD','WTI','COPPER']},
-  {name:'Credit',label:'信用',detail:'信用',symbols:['AAA3Y','AA+3Y','AA3Y']},
-  {name:'Options',label:'期权与波动率',detail:'波动率',symbols:['VIX','MOVE']}
-];
-let indicators=[],events=[],activeCategory='全部';
-const $=s=>document.querySelector(s); const $$=s=>[...document.querySelectorAll(s)];
-const visualDebug=window.location.search.indexOf('debug=1')>=0;
-let visualDebugPanel;
-function debugText(value){if(value===undefined)return'';if(value instanceof Error)return `${value.name}: ${value.message}\n${value.stack||''}`;if(typeof value==='string')return value;try{return JSON.stringify(value)}catch(e){return String(value)}}
-function visualLog(step,detail,isError){console[isError?'error':'log']('[market]',step,detail===undefined?'':detail);if(!visualDebug)return;if(!visualDebugPanel){visualDebugPanel=document.createElement('div');visualDebugPanel.id='visualDebugPanel';visualDebugPanel.style.cssText='position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;max-height:46vh;overflow:auto;padding:10px;background:rgba(15,24,22,.96);color:#d9e4df;border:1px solid #567068;border-radius:8px;font:11px/1.45 monospace;white-space:pre-wrap;word-break:break-word;box-shadow:0 8px 30px rgba(0,0,0,.35)';document.body.appendChild(visualDebugPanel)}const row=document.createElement('div');row.style.cssText=`padding:3px 0;border-bottom:1px solid #2f423d;color:${isError?'#ff8d7d':'#d9e4df'}`;row.textContent=`${new Date().toISOString().slice(11,23)} ${step}${detail===undefined?'':' · '+debugText(detail)}`;visualDebugPanel.appendChild(row);visualDebugPanel.scrollTop=visualDebugPanel.scrollHeight}
-window.onerror=function(message,source,line,column,error){visualLog('window.onerror',{message:String(message),source:source||'',line:line||0,column:column||0,stack:error&&error.stack?error.stack:''},true)};
-window.addEventListener('unhandledrejection',function(event){visualLog('unhandledrejection',event.reason||'unknown rejection',true)});
-function formatError(stage,x,error){visualLog(stage+':error',{symbol:x&&x.symbol?x.symbol:'unknown',message:error.message||String(error),stack:error.stack||''},true);throw error}
-function change(x){try{return x.change_type==='bp'?(x.value-x.previous_value)*(x.value_unit==='bp'?1:100):(x.previous_value?((x.value/x.previous_value)-1)*100:0)}catch(e){return formatError('formatChange',x,e)}}
-function changeText(x){try{const n=change(x),sign=n>0?'+':'';return `${n>0?'↑':n<0?'↓':'—'} ${sign}${n.toFixed(x.change_type==='bp'?1:2)}${x.change_type==='bp'?' bp':'%'}`}catch(e){return formatError('formatChangeText',x,e)}}
-function cls(x){try{return change(x)>0?'up':change(x)<0?'down':'flat'}catch(e){return formatError('formatClass',x,e)}}
-function valueText(x){try{return `${Number(x.value).toLocaleString('zh-CN',{maximumFractionDigits:4})}${x.value_unit==='%'?'%':''}`}catch(e){return formatError('formatValue',x,e)}}
-function readResponseText(response,label){let meta;try{meta={bodyUsed:response.bodyUsed,contentType:response.headers.get('content-type'),contentLength:response.headers.get('content-length')}}catch(e){meta={metadataError:e.message}}visualLog(label+':read:start',meta);return new Promise(function(resolve,reject){let settled=false;const pendingTimer=setTimeout(function(){if(!settled)visualLog(label+':read:pending',{seconds:3,bodyUsed:response.bodyUsed},true)},3000),timeoutTimer=setTimeout(function(){if(settled)return;settled=true;visualLog(label+':read:timeout',{seconds:15,bodyUsed:response.bodyUsed},true);reject(new Error(label+' 响应体读取超过 15 秒'))},15000);let textPromise;try{textPromise=response.text();visualLog(label+':textPromise',{thenable:Boolean(textPromise&&typeof textPromise.then==='function'),bodyUsed:response.bodyUsed})}catch(e){settled=true;clearTimeout(pendingTimer);clearTimeout(timeoutTimer);visualLog(label+':read:throw',e,true);reject(e);return}Promise.resolve(textPromise).then(function(text){if(settled)return;settled=true;clearTimeout(pendingTimer);clearTimeout(timeoutTimer);visualLog(label+':read:resolved',{length:text.length,bodyUsed:response.bodyUsed});resolve(text)},function(error){if(settled)return;settled=true;clearTimeout(pendingTimer);clearTimeout(timeoutTimer);visualLog(label+':read:rejected',error,true);reject(error)})})}
-function loadDashboardWithXhr(){return new Promise(function(resolve,reject){const xhr=new XMLHttpRequest();xhr.open('GET','/api/dashboard-compat?t='+Date.now(),true);xhr.responseType='text';xhr.timeout=10000;xhr.setRequestHeader('Cache-Control','no-cache');xhr.onload=function(){if(xhr.status<200||xhr.status>=300)return reject(new Error('兼容接口请求失败：'+xhr.status));try{resolve(JSON.parse(xhr.responseText))}catch(e){reject(new Error('兼容接口 JSON 解析失败：'+e.message))}};xhr.onerror=function(){reject(new Error('兼容接口网络错误'))};xhr.ontimeout=function(){reject(new Error('兼容接口请求超时'))};xhr.send()})}
-async function loadDashboardWithFetch(){const response=await fetch('/api/dashboard?t='+Date.now(),{cache:'no-store'});if(!response.ok)throw new Error(`API 请求失败：dashboard ${response.status}`);return JSON.parse(await readResponseText(response,'dashboardText'))}
-async function load(){try{visualLog('loadData:start');let dashboard;try{dashboard=await loadDashboardWithXhr();visualLog('loadData:xhr:complete')}catch(xhrError){visualLog('loadData:xhr:fallback',xhrError,true);dashboard=await loadDashboardWithFetch()}if(!dashboard||!Array.isArray(dashboard.indicators)||!Array.isArray(dashboard.events))throw new Error('Dashboard API 返回格式无效');indicators=dashboard.indicators.map(function(item){return item});events=dashboard.events.map(function(item){return item});visualLog('loadData:normalized',{indicators:indicators.length,events:events.length});renderAll();visualLog('loadData:complete')}catch(e){visualLog('loadData:error',e,true);toast('数据加载失败：'+e.message)}finally{visualLog('loadData:end')}}
-function runRender(name,render){visualLog(name+':call');try{render();visualLog(name+':ok')}catch(e){visualLog(name+':error',e&&e.stack?e.stack:e,true)}}
-function renderAll(){console.log('render start');visualLog('render:start');runRender('renderHeader',function(){const dates=indicators.map(x=>x.as_of).sort(),latestDate=$('#latestDate');if(latestDate)latestDate.textContent=dates.length?dates[dates.length-1]:'—'});runRender('renderTicker',renderTicker);runRender('renderOverview',renderOverview);runRender('renderEvents',renderEvents);runRender('renderTable',renderDetails);runRender('renderEditor',renderEditor);console.log('render done');visualLog('render:done')}
-function renderTicker(){visualLog('renderTicker:start');const root=$('#ticker');if(!root){visualLog('renderTicker:error','missing #ticker',true);return}const syms=['CN10Y','US10Y','DXY','SPX','GOLD','VIX'];root.innerHTML=syms.map(s=>indicators.find(x=>x.symbol===s)).filter(Boolean).map(x=>`<div class="ticker-item"><small>${x.symbol}</small><b>${valueText(x)}</b><strong class="${cls(x)}">${changeText(x)}</strong></div>`).join('');visualLog('renderTicker:complete',{items:root.children.length})}
-function overviewRow(symbol){const x=indicators.find(item=>item.symbol===symbol);if(!x)return `<div class="overview-missing"><b>${symbol}</b><span>暂无数据</span></div>`;const pending=x.source==='待手工录入';const mode=x.is_manual?'手工维护':'自动更新';return `<div class="overview-row ${pending?'is-pending':''}"><div class="overview-name"><b>${x.name}</b><small>${x.symbol}</small></div><div class="overview-quote"><strong>${pending?'待录入':valueText(x)}</strong><span class="${pending?'flat':cls(x)}">${pending?'—':changeText(x)}</span></div><div class="overview-meta"><span>${x.as_of||'暂无数据'} · ${x.frequency||'—'}</span><span title="${x.source||'暂无数据'}">${x.source||'暂无数据'}</span></div><span class="update-badge ${x.is_manual?'manual':'auto'}">${mode}</span></div>`}
-function renderOverview(){visualLog('renderOverview:start');const root=$('#overviewGrid');if(!root){visualLog('renderOverview:error','missing #overviewGrid',true);return}root.innerHTML=OVERVIEW_GROUPS.map(group=>`<article class="market-group"><div class="group-head"><div><p>${group.name}</p><h3>${group.label}</h3></div><button class="group-link" data-detail="${group.detail}">查看详细数据 <span>→</span></button></div><div class="overview-list">${group.symbols.map(overviewRow).join('')}</div></article>`).join('');$$('.group-link').forEach(button=>button.onclick=()=>{activeCategory=button.dataset.detail;go('details');renderDetails()});visualLog('renderOverview:complete',{groups:OVERVIEW_GROUPS.length})}
-function renderEvents(){visualLog('renderEvents:start');const root=$('#eventList');if(!root){visualLog('renderEvents:error','missing #eventList',true);return}root.innerHTML=events.length?events.map(e=>`<div class="event"><time>${e.event_time.slice(5,10)}<br>${e.event_time.slice(11,16)}</time><span class="region">${e.region}</span><b>${e.name}</b><span class="stars">${'★'.repeat(e.importance)}</span><small>前值 ${e.previous||'—'}</small><small>预期 ${e.forecast||'—'}</small></div>`).join(''):'<p class="empty">暂无事件</p>';visualLog('renderEvents:complete',{events:events.length})}
-function renderTabs(){const root=$('#categoryTabs');if(!root)return console.warn('[market] missing #categoryTabs');root.innerHTML=['全部',...CATEGORIES.slice(0,-1)].map(c=>`<button class="tab ${activeCategory===c?'active':''}" data-category="${c}">${c}</button>`).join('');$$('.tab').forEach(b=>b.onclick=()=>{activeCategory=b.dataset.category;renderDetails()})}
-function card(x){return `<article class="card"><div class="card-top"><div class="card-name"><b>${x.name}</b><small>${x.symbol}</small></div>${x.is_manual?'<span class="manual-badge">手工</span>':''}</div><div class="card-main"><div class="card-value">${valueText(x)} <small>${x.value_unit!=='%'?x.value_unit:''}</small></div><div class="card-change ${cls(x)}">${changeText(x)}</div></div><div class="card-meta"><span>${x.source}</span><span>${x.as_of} · ${x.frequency}</span></div></article>`}
-function renderDetails(){visualLog('renderTable:start',{category:activeCategory});renderTabs();const input=$('#searchInput'),root=$('#detailsRoot');if(!root){visualLog('renderTable:error','missing #detailsRoot',true);return}const q=input?input.value.trim().toLowerCase():'';const cats=activeCategory==='全部'?CATEGORIES.slice(0,-1):[activeCategory];const html=cats.map(cat=>{const xs=indicators.filter(x=>x.category===cat&&(!q||`${x.name} ${x.symbol} ${x.source}`.toLowerCase().includes(q)));if(!xs.length)return'';return `<section class="detail-section"><div class="detail-title"><h2>${cat}</h2><small>${xs.length} 项指标</small><span></span></div><div class="cards">${xs.map(card).join('')}</div></section>`}).join('');root.innerHTML=html||'<div class="empty">没有匹配的指标</div>';visualLog('renderTable:complete',{cards:root.querySelectorAll('.card').length})}
-function renderEditor(){visualLog('renderEditor:start');const root=$('#editTable');if(!root){visualLog('renderEditor:error','missing #editTable',true);return}const manual=indicators.filter(x=>x.is_manual);root.innerHTML=manual.map(x=>`<tr><td><b>${x.name}</b><br><small>${x.symbol}</small></td><td>${x.category}</td><td>${valueText(x)} <span class="${cls(x)}">${changeText(x)}</span></td><td>${x.as_of}</td><td>${x.source}</td><td><button class="edit-btn" data-id="${x.id}">编辑</button></td></tr>`).join('');$$('.edit-btn').forEach(b=>b.onclick=()=>openDialog(indicators.find(x=>x.id===Number(b.dataset.id))));visualLog('renderEditor:complete',{rows:manual.length})}
-const form=$('#indicatorForm'), dialog=$('#editDialog');
-function formValues(fd){const data={};fd.forEach((value,key)=>data[key]=value);return data}
-function openDialog(x){if(!form||!dialog)return toast('当前浏览器无法打开编辑窗口');form.reset();const error=$('#formError'),title=$('#dialogTitle');if(error)error.textContent='';if(title)title.textContent=x?'编辑指标':'新增指标';if(x){Object.keys(x).forEach(k=>{const v=x[k],el=form.elements[k];if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v})}else{form.elements.source.value='Wind 手工';form.elements.frequency.value='Daily Close';form.elements.as_of.value=new Date().toISOString().slice(0,10);form.elements.sort_order.value=99}if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','')}
-if(form)form.onsubmit=async e=>{e.preventDefault();const data=formValues(new FormData(form));data.is_featured=form.elements.is_featured.checked;const id=data.id;delete data.id;const res=await fetch(id?`/api/indicators/${id}`:'/api/indicators',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const out=await res.json();if(!res.ok){const error=$('#formError');if(error)error.textContent=out.error;return}dialog.close();toast('指标已保存到云端数据库');await load()};
-const eventForm=$('#eventForm');if(eventForm)eventForm.onsubmit=async e=>{e.preventDefault();const data=formValues(new FormData(e.target));const res=await fetch('/api/events',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),out=await res.json();if(!res.ok)return toast(out.error);e.target.reset();toast('宏观事件已保存');await load()};
-function toast(s){const t=$('#toast');if(!t)return console.warn('[market] toast unavailable',s);t.textContent=s;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
-function go(page){$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page));$$('.page').forEach(x=>x.classList.toggle('active',x.id===page));const meta={overview:['市场总览','用最少的数据，看清今天的市场方向。'],details:['详细数据','九大品类完整指标库，支持搜索和筛选。'],editor:['数据维护','在网页中直接维护手工数据，并持久保存。']}[page];$('#pageTitle').textContent=meta[0];$('#pageDesc').textContent=meta[1]}
-$$('.nav').forEach(b=>b.onclick=()=>go(b.dataset.page));$$('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));const searchInput=$('#searchInput'),refreshBtn=$('#refreshBtn'),newBtn=$('#newBtn'),closeDialog=$('#closeDialog'),cancelDialog=$('#cancelDialog'),categorySelect=$('#categorySelect');if(searchInput)searchInput.oninput=renderDetails;if(refreshBtn)refreshBtn.onclick=()=>load().then(()=>toast('数据已刷新'));if(newBtn)newBtn.onclick=()=>openDialog();if(closeDialog)closeDialog.onclick=()=>dialog.close();if(cancelDialog)cancelDialog.onclick=()=>dialog.close();if(categorySelect)categorySelect.innerHTML=CATEGORIES.slice(0,-1).map(c=>`<option>${c}</option>`).join('');
-load();
+/* Stable ES5 client; append ?debug=1 to show staged compatibility diagnostics. */
+(function () {
+  var indicators = [];
+  var events = [];
+  var activeCategory = '全部';
+  var editingIndicatorId = null;
+  var categories = ['流动性', '利率', '国债期货', '外汇', '股票', '商品', '波动率', '信用', '宏观日历'];
+  var groups = [
+    { name: 'Rates', label: '利率', detail: '利率', symbols: ['DR007', 'CN10Y', 'US10Y', 'T.CFE'] },
+    { name: 'FX', label: '外汇', detail: '外汇', symbols: ['DXY', 'USDCNY', 'USDJPY', 'EURUSD'] },
+    { name: 'Equity', label: '权益', detail: '股票', symbols: ['CSI300', 'HSTECH', 'SPX', 'NDX'] },
+    { name: 'Commodity', label: '商品', detail: '商品', symbols: ['GOLD', 'WTI', 'COPPER'] },
+    { name: 'Credit', label: '信用', detail: '信用', symbols: ['AAA3Y', 'AA+3Y', 'AA3Y'] },
+    { name: 'Options', label: '期权与波动率', detail: '波动率', symbols: ['VIX', 'MOVE'] }
+  ];
+  var debugEnabled = window.location.search.indexOf('debug=1') >= 0;
+  var stageBox;
+
+  function byId(id) { return document.getElementById(id); }
+  function all(selector) { return document.querySelectorAll(selector); }
+  function text(value) { return value === null || value === undefined || value === '' ? '暂无数据' : String(value); }
+
+  function createStageBox() {
+    if (!debugEnabled) return;
+    stageBox = document.createElement('div');
+    stageBox.id = 'compat2Status';
+    stageBox.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;padding:8px 12px;background:#10221e;color:#fff;font:12px/1.45 monospace;white-space:pre-wrap;max-height:28vh;overflow:auto;border-bottom:2px solid #c7a75b';
+    document.body.appendChild(stageBox);
+    document.body.style.paddingTop = '82px';
+  }
+
+  function report(stage, state, error, last) {
+    var row = document.createElement('div');
+    var message = '阶段 ' + stage + ' | ' + state + ' | 最后成功: ' + (last || '—');
+    if (error) message += '\nerror.name=' + text(error.name) + ' | error.message=' + text(error.message) + '\nerror.stack=' + text(error.stack);
+    if (!stageBox) {
+      if (error) showError('数据加载失败：' + text(error.message));
+      return;
+    }
+    row.appendChild(document.createTextNode(message));
+    row.style.cssText = 'padding:3px 0;border-bottom:1px solid #49615b;color:' + (error ? '#ff9c8d' : '#dce8e4');
+    stageBox.appendChild(row);
+    stageBox.scrollTop = stageBox.scrollHeight;
+  }
+
+  function showError(message) {
+    var toast = byId('toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = 'toast show';
+    window.setTimeout(function () { toast.className = 'toast'; }, 4000);
+  }
+
+  function runStage(name, work) {
+    try {
+      work();
+      report(name, 'success', null, runStage.last || '完成');
+      return true;
+    } catch (error) {
+      report(name, 'failed', error, runStage.last || '—');
+      return false;
+    }
+  }
+
+  function findSymbol(symbol) {
+    var i;
+    for (i = 0; i < indicators.length; i += 1) {
+      if (indicators[i].symbol === symbol) return indicators[i];
+    }
+    return null;
+  }
+
+  function simpleValue(item) {
+    if (!item || item.source === '待手工录入') return '待录入';
+    return text(item.value) + (item.value_unit ? (item.value_unit === '%' ? '%' : ' ' + item.value_unit) : '');
+  }
+
+  function simpleChange(item) {
+    var change;
+    if (!item || item.source === '待手工录入') return '—';
+    if (item.change_type === 'bp') change = (Number(item.value) - Number(item.previous_value)) * (item.value_unit === 'bp' ? 1 : 100);
+    else change = Number(item.previous_value) ? (Number(item.value) / Number(item.previous_value) - 1) * 100 : 0;
+    if (!isFinite(change)) return '暂无数据';
+    return (change > 0 ? '↑ +' : change < 0 ? '↓ ' : '— ') + change.toFixed(item.change_type === 'bp' ? 1 : 2) + ' ' + (item.change_type === 'bp' ? 'bp' : '%');
+  }
+
+  function simpleClass(item) {
+    var change = Number(item.value) - Number(item.previous_value);
+    return change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+  }
+
+  function overviewRow(item, symbol) {
+    if (!item) return '<div class="overview-missing"><b>' + symbol + '</b><span>暂无数据</span></div>';
+    return '<div class="overview-row"><div class="overview-name"><b>' + text(item.name) + '</b><small>' + text(item.symbol) + '</small></div>' +
+      '<div class="overview-quote"><strong>' + simpleValue(item) + '</strong><span class="' + simpleClass(item) + '">' + simpleChange(item) + '</span></div>' +
+      '<div class="overview-meta"><span>' + text(item.as_of) + ' · ' + text(item.frequency) + '</span><span>' + text(item.source) + '</span></div>' +
+      '<span class="update-badge ' + (item.is_manual ? 'manual' : 'auto') + '">' + (item.is_manual ? '手工维护' : '自动更新') + '</span></div>';
+  }
+
+  function stageA() {
+    var latest = byId('latestDate');
+    var i;
+    var value = '';
+    for (i = 0; i < indicators.length; i += 1) {
+      if (indicators[i].as_of && indicators[i].as_of > value) value = indicators[i].as_of;
+      runStage.last = indicators[i].symbol || String(i);
+    }
+    latest.textContent = value || '—';
+  }
+
+  function stageB() {
+    byId('overviewGrid').innerHTML = '<article class="market-group"><div class="group-head"><div><p>Stage B</p><h3>硬编码测试卡</h3></div></div><div class="overview-list"><div class="overview-row"><div class="overview-name"><b>硬编码指标</b><small>STATIC</small></div><div class="overview-quote"><strong>1.00</strong><span class="flat">— 0.00</span></div></div></div></article>';
+    runStage.last = 'STATIC';
+  }
+
+  function stageC() {
+    var item = indicators[0];
+    byId('overviewGrid').innerHTML = '<article class="market-group"><div class="group-head"><div><p>Stage C</p><h3>首条接口指标</h3></div></div><div class="overview-list">' + overviewRow(item, item ? item.symbol : 'index=0') + '</div></article>';
+    runStage.last = item ? item.symbol : 'index=0';
+  }
+
+  function stageD() {
+    var grid = byId('overviewGrid');
+    var ticker = byId('ticker');
+    var html = '';
+    var tickerHtml = '';
+    var tickerSymbols = ['CN10Y', 'US10Y', 'DXY', 'SPX', 'GOLD', 'VIX'];
+    var g;
+    var s;
+    var item;
+    for (g = 0; g < groups.length; g += 1) {
+      html += '<article class="market-group"><div class="group-head"><div><p>' + groups[g].name + '</p><h3>' + groups[g].label + '</h3></div><button class="group-link" data-detail="' + groups[g].detail + '">查看详细数据 <span>→</span></button></div><div class="overview-list">';
+      for (s = 0; s < groups[g].symbols.length; s += 1) {
+        item = findSymbol(groups[g].symbols[s]);
+        html += overviewRow(item, groups[g].symbols[s]);
+        runStage.last = groups[g].symbols[s] + '/index=' + s;
+      }
+      html += '</div></article>';
+    }
+    grid.innerHTML = html;
+    for (s = 0; s < tickerSymbols.length; s += 1) {
+      item = findSymbol(tickerSymbols[s]);
+      if (item) tickerHtml += '<div class="ticker-item"><small>' + item.symbol + '</small><b>' + simpleValue(item) + '</b><strong class="' + simpleClass(item) + '">' + simpleChange(item) + '</strong></div>';
+    }
+    ticker.innerHTML = tickerHtml;
+  }
+
+  function stageE() {
+    var root = byId('eventList');
+    var html = '';
+    var i;
+    for (i = 0; i < events.length; i += 1) {
+      html += '<div class="event"><time>' + text(events[i].event_time).substring(5, 10) + '<br>' + text(events[i].event_time).substring(11, 16) + '</time><span class="region">' + text(events[i].region) + '</span><b>' + text(events[i].name) + '</b><span class="stars">' + text(events[i].importance) + '星</span><small>前值 ' + text(events[i].previous) + '</small><small>预期 ' + text(events[i].forecast) + '</small></div>';
+      runStage.last = 'event index=' + i;
+    }
+    root.innerHTML = html || '<p class="empty">暂无事件</p>';
+  }
+
+  function showPage(page) {
+    var navs = all('.nav');
+    var pages = all('.page');
+    var i;
+    for (i = 0; i < navs.length; i += 1) navs[i].className = navs[i].getAttribute('data-page') === page ? 'nav active' : 'nav';
+    for (i = 0; i < pages.length; i += 1) pages[i].className = pages[i].id === page ? 'page active' : 'page';
+    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'details' ? '详细数据' : '数据维护';
+  }
+
+  function renderDetails() {
+    var root = byId('detailsRoot');
+    var query = byId('searchInput').value.toLowerCase();
+    var html = '<section class="detail-section"><div class="cards">';
+    var i;
+    var item;
+    for (i = 0; i < indicators.length; i += 1) {
+      item = indicators[i];
+      if (activeCategory !== '全部' && item.category !== activeCategory) continue;
+      if (query && (text(item.name) + ' ' + text(item.symbol) + ' ' + text(item.source)).toLowerCase().indexOf(query) < 0) continue;
+      html += '<article class="card"><div class="card-name"><b>' + text(item.name) + '</b><small>' + text(item.symbol) + '</small></div><div class="card-main"><div class="card-value">' + simpleValue(item) + '</div><div class="card-change ' + simpleClass(item) + '">' + simpleChange(item) + '</div></div><div class="card-meta"><span>' + text(item.source) + '</span><span>' + text(item.as_of) + '</span></div></article>';
+      runStage.last = item.symbol + '/index=' + i;
+    }
+    root.innerHTML = html + '</div></section>';
+  }
+
+  function renderTabs() {
+    var root = byId('categoryTabs');
+    var values = ['全部'].concat(categories.slice(0, categories.length - 1));
+    var i;
+    var button;
+    root.innerHTML = '';
+    for (i = 0; i < values.length; i += 1) {
+      button = document.createElement('button');
+      button.className = values[i] === activeCategory ? 'tab active' : 'tab';
+      button.setAttribute('data-category', values[i]);
+      button.appendChild(document.createTextNode(values[i]));
+      button.onclick = function () { activeCategory = this.getAttribute('data-category'); renderTabs(); renderDetails(); };
+      root.appendChild(button);
+    }
+  }
+
+  function renderEditor() {
+    var root = byId('editTable');
+    var html = '';
+    var i;
+    for (i = 0; i < indicators.length; i += 1) {
+      if (!indicators[i].is_manual) continue;
+      html += '<tr><td><b>' + text(indicators[i].name) + '</b><br><small>' + text(indicators[i].symbol) + '</small></td><td>' + text(indicators[i].category) + '</td><td>' + simpleValue(indicators[i]) + '</td><td>' + text(indicators[i].as_of) + '</td><td>' + text(indicators[i].source) + '</td><td><button class="edit-btn" data-id="' + indicators[i].id + '">编辑</button></td></tr>';
+    }
+    root.innerHTML = html;
+    attachEditButtons();
+  }
+
+  function attachEditButtons() {
+    var buttons = all('.edit-btn');
+    var i;
+    for (i = 0; i < buttons.length; i += 1) {
+      buttons[i].onclick = function () {
+        var id = Number(this.getAttribute('data-id'));
+        var j;
+        for (j = 0; j < indicators.length; j += 1) {
+          if (Number(indicators[j].id) === id) { openIndicatorDialog(indicators[j]); return; }
+        }
+      };
+    }
+  }
+
+  function openIndicatorDialog(item) {
+    var dialog = byId('editDialog');
+    var form = byId('indicatorForm');
+    var key;
+    var field;
+    form.reset();
+    editingIndicatorId = item ? Number(item.id) : null;
+    byId('dialogTitle').textContent = item ? '编辑指标' : '新增指标';
+    if (item) {
+      for (key in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
+        field = form.elements[key];
+        if (!field) continue;
+        if (field.type === 'checkbox') field.checked = Boolean(item[key]);
+        else field.value = item[key] === null ? '' : item[key];
+      }
+    } else {
+      form.elements.source.value = 'Wind 手工';
+      form.elements.frequency.value = 'Daily Close';
+      form.elements.sort_order.value = '99';
+      form.elements.as_of.value = new Date().toISOString().substring(0, 10);
+    }
+    if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', 'open');
+  }
+
+  function request(method, url, payload, done, failed) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.timeout = 10000;
+    if (payload !== null) xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function () { if (xhr.status >= 200 && xhr.status < 300) done(xhr.responseText); else failed(new Error('HTTP ' + xhr.status)); };
+    xhr.onerror = function () { failed(new Error('网络错误')); };
+    xhr.ontimeout = function () { failed(new Error('请求超时')); };
+    xhr.send(payload === null ? null : JSON.stringify(payload));
+  }
+
+  function refreshMarketData() {
+    var button = byId('refreshBtn');
+    var xhr = new XMLHttpRequest();
+    button.disabled = true;
+    button.textContent = '更新中…';
+    xhr.open('POST', '/api/refresh', true);
+    xhr.timeout = 120000;
+    xhr.onload = function () {
+      button.disabled = false;
+      button.textContent = '↻ 刷新';
+      if (xhr.status >= 200 && xhr.status < 300) loadDashboard();
+      else report('刷新', 'failed', new Error('HTTP ' + xhr.status), 'api/refresh');
+    };
+    xhr.onerror = function () { button.disabled = false; button.textContent = '↻ 刷新'; report('刷新', 'failed', new Error('网络错误'), 'api/refresh'); };
+    xhr.ontimeout = function () { button.disabled = false; button.textContent = '↻ 刷新'; report('刷新', 'failed', new Error('请求超时'), 'api/refresh'); };
+    xhr.send(null);
+  }
+
+  function attachListeners() {
+    var navs = all('.nav');
+    var links = all('[data-go]');
+    var groupLinks = all('.group-link');
+    var categorySelect = byId('categorySelect');
+    var option;
+    var i;
+    for (i = 0; i < navs.length; i += 1) navs[i].onclick = function () { showPage(this.getAttribute('data-page')); };
+    for (i = 0; i < links.length; i += 1) links[i].onclick = function () { showPage(this.getAttribute('data-go')); };
+    for (i = 0; i < groupLinks.length; i += 1) groupLinks[i].onclick = function () { activeCategory = this.getAttribute('data-detail'); renderTabs(); renderDetails(); showPage('details'); };
+    byId('searchInput').oninput = renderDetails;
+    byId('refreshBtn').onclick = refreshMarketData;
+    byId('newBtn').onclick = function () { openIndicatorDialog(null); };
+    byId('closeDialog').onclick = function () { byId('editDialog').close(); };
+    byId('cancelDialog').onclick = function () { byId('editDialog').close(); };
+    categorySelect.innerHTML = '';
+    for (i = 0; i < categories.length - 1; i += 1) {
+      option = document.createElement('option');
+      option.appendChild(document.createTextNode(categories[i]));
+      categorySelect.appendChild(option);
+    }
+    byId('indicatorForm').onsubmit = function (event) {
+      var form = this;
+      var payload = formPayload(form);
+      var method = editingIndicatorId ? 'PUT' : 'POST';
+      var url = editingIndicatorId ? '/api/indicators/' + editingIndicatorId : '/api/indicators';
+      event.preventDefault();
+      payload.is_featured = form.elements.is_featured.checked;
+      request(method, url, payload, function () { editingIndicatorId = null; byId('editDialog').close(); loadDashboard(); }, function (error) { report('F 指标保存', 'failed', error, payload.symbol || '—'); });
+    };
+    byId('eventForm').onsubmit = function (event) {
+      var form = this;
+      var payload = formPayload(form);
+      event.preventDefault();
+      request('POST', '/api/events', payload, function () { form.reset(); loadDashboard(); }, function (error) { report('F 事件保存', 'failed', error, payload.name || '—'); });
+    };
+    renderTabs();
+    renderDetails();
+    renderEditor();
+    runStage.last = 'listeners';
+  }
+
+  function formPayload(form) {
+    var payload = {};
+    var i;
+    var field;
+    for (i = 0; i < form.elements.length; i += 1) {
+      field = form.elements[i];
+      if (field.name) payload[field.name] = field.value;
+    }
+    return payload;
+  }
+
+  function runStages() {
+    runStage.last = '—';
+    runStage('A 数据基准', stageA);
+    if (debugEnabled) {
+      runStage('B 硬编码卡片', stageB);
+      runStage('C 首条接口指标', stageC);
+    }
+    runStage('D 全部市场总览', stageD);
+    runStage('E 宏观事件', stageE);
+    runStage('F 导航与维护监听器', attachListeners);
+  }
+
+  function loadDashboard() {
+    var xhr;
+    report('XHR', 'start', null, 'create');
+    try {
+      xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/dashboard-compat?t=' + new Date().getTime(), true);
+      xhr.responseType = 'text';
+      xhr.timeout = 10000;
+      xhr.onload = function () {
+        var data;
+        try {
+          if (xhr.status < 200 || xhr.status >= 300) throw new Error('HTTP ' + xhr.status);
+          data = JSON.parse(xhr.responseText);
+          indicators = data.indicators;
+          events = data.events;
+          report('XHR', 'success', null, 'indicators=' + indicators.length + ' events=' + events.length);
+          runStages();
+        } catch (error) {
+          report('XHR onload', 'failed', error, 'responseLength=' + (xhr.responseText ? xhr.responseText.length : 0));
+        }
+      };
+      xhr.onerror = function () { report('XHR', 'failed', new Error('网络错误'), 'onerror'); };
+      xhr.ontimeout = function () { report('XHR', 'failed', new Error('请求超时'), 'ontimeout'); };
+      xhr.onabort = function () { report('XHR', 'failed', new Error('请求中止'), 'onabort'); };
+      xhr.send(null);
+    } catch (error) {
+      report('XHR create/send', 'failed', error, '—');
+    }
+  }
+
+  createStageBox();
+  loadDashboard();
+}());
