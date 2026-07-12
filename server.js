@@ -16,6 +16,17 @@ function json(res, status, body) {
   res.shouldKeepAlive = false;
   res.end(payload);
 }
+function compatJson(res, status, body) {
+  const buffer = Buffer.from(JSON.stringify(body), 'utf8');
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Length', buffer.length);
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Connection', 'close');
+  res.shouldKeepAlive = false;
+  res.end(buffer);
+}
 function apiRow(row) {
   return row ? { ...row, id: Number(row.id) } : row;
 }
@@ -142,6 +153,14 @@ const server = http.createServer(async (req,res)=>{
       const indicatorsResult = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
       const eventsResult = await query('SELECT * FROM macro_events ORDER BY event_time');
       return json(res,200,{
+        indicators: indicatorsResult.rows.map(apiRow),
+        events: eventsResult.rows.map(apiRow)
+      });
+    }
+    if (url.pathname === '/api/dashboard-compat' && req.method === 'GET') {
+      const indicatorsResult = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
+      const eventsResult = await query('SELECT * FROM macro_events ORDER BY event_time');
+      return compatJson(res,200,{
         indicators: indicatorsResult.rows.map(apiRow),
         events: eventsResult.rows.map(apiRow)
       });
