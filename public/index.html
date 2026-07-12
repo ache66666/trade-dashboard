@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="overview.css"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260712"></head>
 <body>
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">M</span><div><b>MARKET PULSE</b><small>交易市场工作台</small></div></div>
@@ -33,5 +33,5 @@
   </main>
 
   <dialog id="editDialog"><form id="indicatorForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">DATA ENTRY</p><h2 id="dialogTitle">编辑指标</h2></div><button type="button" class="close" id="closeDialog">×</button></div><input type="hidden" name="id"><div class="form-grid"><label>指标代码 *<input name="symbol" required placeholder="例如 IRS5Y"></label><label>指标名称 *<input name="name" required placeholder="例如 FR007 IRS 5Y"></label><label>品类 *<select name="category" id="categorySelect" required></select></label><label>数值单位<input name="value_unit" placeholder="%、bp、美元/桶"></label><label>当前值 *<input type="number" step="any" name="value" required></label><label>前一交易日值 *<input type="number" step="any" name="previous_value" required></label><label>涨跌口径 *<select name="change_type"><option value="bp">bp（利率/利差）</option><option value="percent">百分比（价格资产）</option></select></label><label>数据日期 *<input type="date" name="as_of" required></label><label>数据来源 *<input name="source" required value="Wind 手工"></label><label>更新频率 *<input name="frequency" required value="Daily Close"></label><label>排序<input type="number" name="sort_order" value="99"></label><label class="check"><input type="checkbox" name="is_featured">加入市场总览</label></div><div class="dialog-actions"><button type="button" class="secondary" id="cancelDialog">取消</button><button class="primary" type="submit">保存到数据库</button></div><p class="form-error" id="formError"></p></form></dialog>
-  <div class="toast" id="toast"></div><script src="app.js"></script><script src="refresh.js"></script>
+  <div class="toast" id="toast"></div><script src="app.js?v=20260712"></script><script src="refresh.js?v=20260712"></script>
 </body></html>

@@ -165,10 +165,12 @@ const server = http.createServer(async (req,res)=>{
     if(url.pathname.startsWith('/api/')) return json(res,404,{error:'接口不存在'});
     const requested=url.pathname==='/'?'index.html':url.pathname.slice(1);
     const file=path.normalize(path.join(ROOT,'public',requested));
+    const exists=fs.existsSync(file);
+    console.log(`[static] pathname=${url.pathname} file=${file} exists=${exists}`);
     if(!file.startsWith(path.join(ROOT,'public'))) {res.writeHead(403);return res.end();}
-    if(!fs.existsSync(file)||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
+    if(!exists||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
-    res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream'}); fs.createReadStream(file).pipe(res);
+    res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
   } catch(e) { json(res,e.code==='23505'?409:500,{error:e.code==='23505'?'代码已存在':e.message}); }
 });
 

@@ -8,7 +8,7 @@ function maskPendingData() {
     if (change) change.textContent = '—';
   });
 }
-new MutationObserver(maskPendingData).observe(document.body, { childList: true, subtree: true });
+if (typeof MutationObserver !== 'undefined') new MutationObserver(maskPendingData).observe(document.body, { childList: true, subtree: true });
 maskPendingData();
 
 document.querySelector('#refreshBtn').onclick = async () => {
