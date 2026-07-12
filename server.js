@@ -138,12 +138,19 @@ const server = http.createServer(async (req,res)=>{
         return json(res,503,{ status:'error', database:'disconnected' });
       }
     }
+    if (url.pathname === '/api/dashboard' && req.method === 'GET') {
+      const indicatorsResult = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
+      const eventsResult = await query('SELECT * FROM macro_events ORDER BY event_time');
+      return json(res,200,{
+        indicators: indicatorsResult.rows.map(apiRow),
+        events: eventsResult.rows.map(apiRow)
+      });
+    }
     if (url.pathname === '/api/indicators' && req.method === 'GET') {
       const result = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
       return json(res,200,result.rows.map(apiRow));
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
-      console.log(`[api] events GET t=${url.searchParams.get('t') || 'none'}`);
       const result = await query('SELECT * FROM macro_events ORDER BY event_time');
       return json(res,200,result.rows.map(apiRow));
     }
