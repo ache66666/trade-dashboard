@@ -1,9 +1,11 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const config = require('./config');
+const logger = require('./logger');
 const { getPool, query, closePool } = require('./database');
 
-const PORT = Number(process.env.PORT || 4173);
+const PORT = config.port;
 const ROOT = __dirname;
 
 function json(res, status, body) {
@@ -144,9 +146,9 @@ const server = http.createServer(async (req,res)=>{
     if (url.pathname === '/api/health' && req.method === 'GET') {
       try {
         await query('SELECT 1');
-        return json(res,200,{ status:'ok', database:'connected' });
+        return json(res,200,{ status:'ok', environment:config.appEnv, database:'connected' });
       } catch {
-        return json(res,503,{ status:'error', database:'disconnected' });
+        return json(res,503,{ status:'error', environment:config.appEnv, database:'disconnected' });
       }
     }
     if (url.pathname === '/api/dashboard' && req.method === 'GET') {
@@ -201,6 +203,14 @@ const server = http.createServer(async (req,res)=>{
     const exists=fs.existsSync(file);
     if(!file.startsWith(path.join(ROOT,'public'))) {res.writeHead(403);return res.end();}
     if(!exists||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
+    if (requested === 'index.html') {
+      const html = fs.readFileSync(file, 'utf8')
+        .replace('__APP_ENV__', config.appEnv)
+        .replace('__DEBUG_PANEL_DEFAULT__', config.debugPanelDefault ? 'true' : 'false');
+      const buffer = Buffer.from(html, 'utf8');
+      res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
+      return res.end(buffer);
+    }
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
   } catch(e) { json(res,e.code==='23505'?409:500,{error:e.code==='23505'?'代码已存在':e.message}); }
@@ -208,7 +218,7 @@ const server = http.createServer(async (req,res)=>{
 
 async function start() {
   await query('SELECT 1');
-  server.listen(PORT,'0.0.0.0',()=>console.log(`Market Workbench: http://localhost:${PORT}`));
+  server.listen(PORT,'0.0.0.0',()=>logger.info(`Market Workbench started on port ${PORT} (${config.appEnv})`));
 }
 
 async function shutdown() {
@@ -221,7 +231,7 @@ async function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 start().catch(async error => {
-  console.error('Market Workbench failed to start:', error.message);
+  logger.error(`Market Workbench failed to start: ${error.message}`);
   await closePool();
   process.exit(1);
 });

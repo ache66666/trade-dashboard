@@ -13,7 +13,8 @@
     { name: 'Credit', label: '信用', detail: '信用', symbols: ['AAA3Y', 'AA+3Y', 'AA3Y'] },
     { name: 'Options', label: '期权与波动率', detail: '波动率', symbols: ['VIX', 'MOVE'] }
   ];
-  var debugEnabled = window.location.search.indexOf('debug=1') >= 0;
+  var publicConfig = window.__APP_CONFIG__ || {};
+  var debugEnabled = Boolean(publicConfig.debugPanelDefault) || window.location.search.indexOf('debug=1') >= 0;
   var stageBox;
 
   function byId(id) { return document.getElementById(id); }
@@ -373,5 +374,6 @@
   }
 
   createStageBox();
+  if (publicConfig.environment === 'staging') byId('environmentBadge').hidden = false;
   loadDashboard();
 }());

@@ -1,4 +1,6 @@
 const { Pool, types } = require('pg');
+const config = require('./config');
+const logger = require('./logger');
 
 // Preserve the API's existing date/time strings instead of converting them
 // through the server's timezone when PostgreSQL values are serialized to JSON.
@@ -7,28 +9,18 @@ types.setTypeParser(1114, value => value.replace(' ', 'T').replace(/:00$/, ''));
 
 let pool;
 
-function positiveInteger(name, fallback) {
-  const value = Number(process.env[name]);
-  return Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
 function getPool() {
   if (pool) return pool;
 
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('缺少 DATABASE_URL，无法连接 Supabase PostgreSQL');
-  }
-
   pool = new Pool({
-    connectionString,
-    max: positiveInteger('DATABASE_POOL_MAX', 10),
-    idleTimeoutMillis: positiveInteger('DATABASE_IDLE_TIMEOUT_MS', 30000),
-    connectionTimeoutMillis: positiveInteger('DATABASE_CONNECTION_TIMEOUT_MS', 10000)
+    connectionString: config.databaseUrl,
+    max: config.databasePoolMax,
+    idleTimeoutMillis: config.databaseIdleTimeoutMs,
+    connectionTimeoutMillis: config.databaseConnectionTimeoutMs
   });
 
   pool.on('error', error => {
-    console.error('PostgreSQL connection pool error:', error.message);
+    logger.error(`PostgreSQL connection pool error: ${error.message}`);
   });
 
   return pool;

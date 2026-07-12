@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260712-layout2"></head>
-<body>
+<body><script>window.__APP_CONFIG__={environment:'__APP_ENV__',debugPanelDefault:__DEBUG_PANEL_DEFAULT__};</script>
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">M</span><div><b>MARKET PULSE</b><small>交易市场工作台</small></div></div>
     <nav>
@@ -12,7 +12,7 @@
     <div class="sidebar-note"><span class="live-dot"></span><div><b>云端数据库已连接</b><small>手工修改会持久保存</small></div></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1 id="pageTitle">市场总览</h1><p id="pageDesc">用最少的数据，看清今天的市场方向。</p></div><div class="header-right"><div class="datebox"><small>数据基准</small><b id="latestDate">—</b></div><button class="refresh" id="refreshBtn">↻ 刷新</button></div></header>
+    <header><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1 id="pageTitle">市场总览</h1><p id="pageDesc">用最少的数据，看清今天的市场方向。</p></div><div class="header-right"><span class="environment-badge" id="environmentBadge" hidden>STAGING</span><div class="datebox"><small>数据基准</small><b id="latestDate">—</b></div><button class="refresh" id="refreshBtn">↻ 刷新</button></div></header>
 
     <section class="page active" id="overview">
       <div class="ticker" id="ticker"></div>
