@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Market Pulse · 前端诊断</title>
+  <style>
+    body { margin: 0; padding: 24px; background: #f4f2ed; color: #18201f; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    main { max-width: 760px; margin: 0 auto; }
+    h1 { font-size: 24px; }
+    section { margin: 12px 0; padding: 16px; background: #fffdfa; border: 1px solid #deddd7; border-radius: 8px; }
+    h2 { margin: 0 0 8px; font-size: 14px; }
+    pre, .value { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+    .pending { color: #7b817e; }
+    .ok { color: #15725c; }
+    .error { color: #c55040; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>生产环境前端诊断</h1>
+
+    <section>
+      <h2>1. navigator.userAgent</h2>
+      <pre id="userAgent"></pre>
+    </section>
+
+    <section>
+      <h2>2. fetch('/api/indicators')</h2>
+      <div id="fetchResult" class="value pending">等待请求…</div>
+    </section>
+
+    <section>
+      <h2>3. JSON 解析</h2>
+      <div id="jsonResult" class="value pending">等待响应…</div>
+    </section>
+
+    <section>
+      <h2>4. innerHTML 渲染</h2>
+      <div id="renderResult" class="value pending">等待数据…</div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var userAgent = document.getElementById('userAgent');
+      var fetchResult = document.getElementById('fetchResult');
+      var jsonResult = document.getElementById('jsonResult');
+      var renderResult = document.getElementById('renderResult');
+
+      userAgent.textContent = navigator.userAgent || '空';
+
+      if (typeof fetch !== 'function') {
+        fetchResult.className = 'value error';
+        fetchResult.textContent = '失败：当前浏览器不支持 fetch';
+        return;
+      }
+
+      fetch('/api/indicators', { cache: 'no-store' })
+        .then(function (response) {
+          fetchResult.className = response.ok ? 'value ok' : 'value error';
+          fetchResult.textContent = 'HTTP ' + response.status + ' ' + response.statusText;
+          return response.text().then(function (text) {
+            return { response: response, text: text };
+          });
+        })
+        .then(function (result) {
+          var data;
+          try {
+            data = JSON.parse(result.text);
+            jsonResult.className = 'value ok';
+            jsonResult.textContent = '成功：类型=' + (Array.isArray(data) ? 'Array' : typeof data) + '，数量=' + (Array.isArray(data) ? data.length : '不适用');
+          } catch (error) {
+            jsonResult.className = 'value error';
+            jsonResult.textContent = '失败：' + error.message + '\n响应前 200 字符：' + result.text.slice(0, 200);
+            return;
+          }
+
+          if (!Array.isArray(data)) {
+            renderResult.className = 'value error';
+            renderResult.innerHTML = '失败：JSON 不是数组';
+            return;
+          }
+
+          renderResult.className = data.length === 32 ? 'value ok' : 'value error';
+          renderResult.innerHTML = '成功渲染：<strong>' + data.length + '</strong> 条指标';
+        })
+        .catch(function (error) {
+          fetchResult.className = 'value error';
+          fetchResult.textContent = '请求失败：' + error.name + ' - ' + error.message;
+          jsonResult.className = 'value error';
+          jsonResult.textContent = '未执行';
+          renderResult.className = 'value error';
+          renderResult.innerHTML = '未执行';
+        });
+    })();
+  </script>
+</body>
+</html>
