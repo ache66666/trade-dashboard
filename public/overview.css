@@ -1,5 +1,9 @@
 /* Issue #001: dense trader-focused market overview */
 #overview .ticker { margin-bottom: 22px; }
+#overview .ticker-item { display: grid; grid-template-columns: minmax(42px, auto) minmax(0, 1fr); grid-template-areas: "symbol value" "symbol change"; gap: 2px 8px; align-items: center; }
+#overview .ticker-item small { grid-area: symbol; min-width: 0; }
+#overview .ticker-item b { grid-area: value; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#overview .ticker-item strong { grid-area: change; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 #overview .section-heading { margin-bottom: 12px; }
 #overview .overview-grid { gap: 12px; margin-bottom: 26px; }
 #overview .market-group { box-shadow: 0 7px 22px rgba(20, 32, 29, .055); }
@@ -10,17 +14,17 @@
 .group-link:hover { text-decoration: underline; }
 .group-link span { margin-left: 3px; }
 .overview-list { display: grid; }
-.overview-row { position: relative; display: grid; grid-template-columns: minmax(115px, 1.2fr) minmax(105px, .9fr); gap: 4px 12px; padding: 10px 14px 9px; border-bottom: 1px solid #efede8; min-height: 69px; }
+.overview-row { position: relative; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(105px, .9fr); grid-template-areas: "name quote" "badge quote" "meta meta"; gap: 3px 12px; padding: 10px 14px 9px; border-bottom: 1px solid #efede8; min-height: 69px; }
 .overview-row:last-child, .overview-missing:last-child { border-bottom: 0; }
-.overview-name { min-width: 0; padding-right: 52px; }
+.overview-name { grid-area: name; min-width: 0; }
 .overview-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .overview-name small { color: #989e9a; font-size: 9px; }
-.overview-quote { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.overview-quote { grid-area: quote; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; white-space: nowrap; }
 .overview-quote strong { font: 500 16px Georgia, serif; }
 .overview-quote span { font-size: 10px; font-weight: 700; }
-.overview-meta { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; color: #999; font-size: 8.5px; }
-.overview-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.update-badge { position: absolute; top: 9px; left: 104px; padding: 2px 5px; border-radius: 8px; font-size: 8px; white-space: nowrap; }
+.overview-meta { grid-area: meta; min-width: 0; display: flex; justify-content: space-between; gap: 12px; color: #999; font-size: 8.5px; }
+.overview-meta span { min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-badge { grid-area: badge; position: static; justify-self: start; padding: 2px 5px; border-radius: 8px; font-size: 8px; line-height: 1.2; white-space: nowrap; }
 .update-badge.auto { color: #15725c; background: #e7f1ec; }
 .update-badge.manual { color: #826d39; background: #f3ecd9; }
 .overview-row.is-pending .overview-quote strong { color: var(--muted); font: 500 12px Inter, sans-serif; }
@@ -34,7 +38,5 @@
 }
 
 @media (max-width: 1100px) {
-  .overview-row { grid-template-columns: 1.15fr .85fr; }
-  .update-badge { display: none; }
-  .overview-name { padding-right: 0; }
+  .overview-row { grid-template-columns: minmax(0, 1.15fr) minmax(95px, .85fr); }
 }
