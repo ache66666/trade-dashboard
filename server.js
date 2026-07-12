@@ -7,8 +7,14 @@ const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
 
 function json(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify(body));
+  const payload = JSON.stringify(body);
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Length', Buffer.byteLength(payload));
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Connection', 'close');
+  res.shouldKeepAlive = false;
+  res.end(payload);
 }
 function apiRow(row) {
   return row ? { ...row, id: Number(row.id) } : row;
