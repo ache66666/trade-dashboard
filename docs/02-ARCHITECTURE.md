@@ -20,6 +20,7 @@ Supabase PostgreSQL
 | 模块 | 职责 |
 | --- | --- |
 | `config.js` | 统一读取并校验运行环境、数据库、日志、端口和连接池配置 |
+| `runtime-info.js` | 解析部署 Commit、版本和可选部署时间，供 Health 与 Debug 使用 |
 | `logger.js` | 按 `LOG_LEVEL` 输出不含密钥的结构化基础日志 |
 | `database.js` | 创建 PostgreSQL 连接池，统一提供查询和关闭连接能力 |
 | `server.js` | HTTP 服务、API 路由、静态资源、健康检查和公开数据刷新 |
@@ -28,6 +29,7 @@ Supabase PostgreSQL
 | `public/*.css` | 全局与市场总览布局样式 |
 | `sql/` | 可显式执行的数据库 schema；应用启动时不自动执行 |
 | `scripts/` | 一次性数据迁移工具，不属于线上运行路径 |
+| `test/` | 不连接 Production 的单元与隔离测试 |
 | `data/` | 本地 SQLite 备份；不参与线上运行且不提交 Git |
 | `docs/` | 产品、技术、运行、发布和决策记录 |
 

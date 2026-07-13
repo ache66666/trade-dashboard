@@ -22,6 +22,8 @@ Production 冒烟验证
 
 任何功能、修复、依赖升级或数据库变更都必须经过 Staging。紧急修复也应先在 Staging 完成最小验证。
 
+正常发布不得手动触发 Render。只有 GitHub Actions 必要检查全部通过后，才允许对应 Deploy Hook 执行。
+
 ## 分支职责
 
 - `feature/<name>`：单一功能或修复，范围清晰。
@@ -43,6 +45,7 @@ Production 冒烟验证
 - [ ] CHANGELOG 的 Unreleased 已更新
 - [ ] Render Staging 部署成功
 - [ ] `/api/health` 返回 `environment=staging`
+- [ ] `/api/health.commit` 与 staging commit 一致且不是 `unknown`
 - [ ] 页面显示 `STAGING`
 - [ ] 读写只影响 Staging 数据库
 - [ ] 桌面 Chrome、第二台电脑、iPhone Safari/Chrome、iPad 完成相关验收
@@ -56,9 +59,13 @@ Production 冒烟验证
 - [ ] Production 数据库变更有备份与回滚方案
 - [ ] `main` 合并完成且 Render 自动部署成功
 - [ ] `/api/health` 返回 `environment=production`
+- [ ] `/api/health.commit` 与 main 正式发布 commit 一致且不是 `unknown`
 - [ ] 页面不显示测试标识或默认调试信息
 - [ ] 首页、指标、事件和关键写操作完成冒烟验证
 - [ ] 工作区 clean，远程分支同步
+- [ ] 正式数据条数与发布前基线一致（除非发布明确包含数据变更）
+
+Production deploy job 如果缺少 `RENDER_PRODUCTION_DEPLOY_HOOK_URL` 必须失败。此时停止发布并补齐 GitHub Environment Secret，不得手动部署绕过。
 
 ## 版本规则
 

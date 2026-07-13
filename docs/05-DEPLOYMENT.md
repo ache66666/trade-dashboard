@@ -23,6 +23,8 @@
 | `DATABASE_POOL_MAX` | 否 | 默认 10；小型 Staging 可设 5 |
 | `DATABASE_IDLE_TIMEOUT_MS` | 否 | 默认 30000 |
 | `DATABASE_CONNECTION_TIMEOUT_MS` | 否 | 默认 10000 |
+| `APP_VERSION` | 否 | 覆盖 `package.json` 版本；通常不必设置 |
+| `DEPLOYED_AT` | 否 | 只有发布系统能提供可靠 ISO 时间时设置 |
 
 `.env.example` 只含占位值。本地真实值放入 `.env`，Render 真实值放入 Environment/Secret。
 
@@ -147,7 +149,7 @@ Render Deploy Hook（Secret 存在时）
 5. 可为 production Environment 添加 required reviewers，防止未经批准触发正式部署。
 6. Secret 值只能来自对应 Render Service 的 Deploy Hook，禁止交叉使用。
 
-如果 Secret 未配置，workflow 仍执行检查，但明确跳过 Deploy Hook。
+Staging Secret 未配置时，workflow 仍执行检查并明确跳过 Staging Deploy Hook。Production Secret 未配置时，Production deploy job 必须失败并阻止发布，不能静默跳过或改为手动部署。
 
 ### Render 配置选择
 
@@ -167,6 +169,19 @@ Render Deploy Hook（Secret 存在时）
 - Production workflow 只监听 `main`，也不引用 Staging Hook。
 - Hook Secret 不传给浏览器、应用进程或日志。
 - workflow 变更本身必须先在 `staging` 验证，再进入 `main`。
+
+### Commit SHA 验证
+
+Render 部署时应用优先读取 `RENDER_GIT_COMMIT`，其他环境可使用 `GITHUB_SHA` 或 `COMMIT_SHA`。部署后：
+
+1. 获取目标分支的完整 Git commit。
+2. 请求 `/api/health`。
+3. 确认 `environment` 正确。
+4. 确认 `commit` 与目标 commit 完全一致；如果平台只提供其他格式，必须至少有可审计的一致映射。
+5. `commit=unknown` 时不得把该部署标记为正式验证完成。
+6. 使用 `?debug=1` 可在页面诊断面板查看环境、Commit 和版本。
+
+正常发布只能由目标分支 push → GitHub Actions → 对应 Render Deploy Hook 完成。禁止为了跳过失败检查而手动点击 Render Deploy。
 
 自动化验收标准见 [测试规范](13-TESTING.md#自动化检查)。
 

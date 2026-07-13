@@ -56,10 +56,11 @@ jobs:
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK_URL }}
 
     steps:
-      - name: Trigger Render Production deploy
-        if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
-        run: curl --fail --show-error --silent --request POST "$RENDER_DEPLOY_HOOK_URL"
-
-      - name: Explain skipped Production deploy
+      - name: Require Production deploy hook
         if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
-        run: echo "RENDER_PRODUCTION_DEPLOY_HOOK_URL is not configured; CI passed without calling a deploy hook."
+        run: |
+          echo "RENDER_PRODUCTION_DEPLOY_HOOK_URL is required; Production deployment is blocked."
+          exit 1
+
+      - name: Trigger Render Production deploy
+        run: curl --fail --show-error --silent --request POST "$RENDER_DEPLOY_HOOK_URL"

@@ -25,6 +25,8 @@ GitHub Actions 在目标分支 push 时执行：
 
 工作流说明见 [部署手册](05-DEPLOYMENT.md#github-actions-自动化)。audit 非阻塞不代表可以忽略高风险漏洞；必须在发布评审中记录处理决定。
 
+当前基础测试覆盖：Health payload状态/环境/版本、Commit缺失回退`unknown`、Production拒绝Seed、Seed重复执行无逻辑重复。测试使用纯函数、子进程安全检查和内存Fake Client，不连接Production数据库。
+
 ## 测试层级
 
 ### 静态检查
@@ -95,6 +97,7 @@ API 契约见 [API 文档](04-API.md)。
 
 - [ ] Health API 返回 200
 - [ ] Health environment 与目标环境一致
+- [ ] Health commit 与部署分支 commit 一致且不是 `unknown`
 - [ ] Indicators API 返回预期结构和数量
 - [ ] Events API 返回预期结构和数量
 - [ ] Dashboard Compat 返回 indicators/events
@@ -134,6 +137,8 @@ API 契约见 [API 文档](04-API.md)。
 - [ ] Sequence 与最大 ID 一致
 - [ ] 重启后数据仍存在
 - [ ] Production 未被测试数据污染
+- [ ] Staging Seed 重复执行仍为5条专用指标、2条专用事件
+- [ ] Production 环境执行 Seed 会在连接数据库前失败
 
 ## 上线前 Checklist
 
@@ -147,6 +152,7 @@ API 契约见 [API 文档](04-API.md)。
 - [ ] Production 备份与回滚点已确认
 - [ ] 数据库迁移有执行人、窗口、验证和回滚方案
 - [ ] Render Production Deploy Hook/自动部署配置正确
+- [ ] 正常发布未使用手动 Render Deploy
 - [ ] 发布负责人明确
 
 ## 上线后 Checklist

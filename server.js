@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config');
 const logger = require('./logger');
+const { handleHealth } = require('./health');
 const { getPool, query, closePool } = require('./database');
 
 const PORT = config.port;
@@ -144,12 +145,7 @@ const server = http.createServer(async (req,res)=>{
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (url.pathname === '/api/health' && req.method === 'GET') {
-      try {
-        await query('SELECT 1');
-        return json(res,200,{ status:'ok', environment:config.appEnv, database:'connected' });
-      } catch {
-        return json(res,503,{ status:'error', environment:config.appEnv, database:'disconnected' });
-      }
+      return handleHealth({ query, sendJson:json, response:res, config });
     }
     if (url.pathname === '/api/dashboard' && req.method === 'GET') {
       const indicatorsResult = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
@@ -205,8 +201,10 @@ const server = http.createServer(async (req,res)=>{
     if(!exists||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
     if (requested === 'index.html') {
       const html = fs.readFileSync(file, 'utf8')
-        .replace('__APP_ENV__', config.appEnv)
-        .replace('__DEBUG_PANEL_DEFAULT__', config.debugPanelDefault ? 'true' : 'false');
+        .replace('__APP_ENV_JSON__', JSON.stringify(config.appEnv))
+        .replace('__DEBUG_PANEL_DEFAULT__', config.debugPanelDefault ? 'true' : 'false')
+        .replace('__APP_COMMIT_JSON__', JSON.stringify(config.commit))
+        .replace('__APP_VERSION_JSON__', JSON.stringify(config.version));
       const buffer = Buffer.from(html, 'utf8');
       res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
       return res.end(buffer);

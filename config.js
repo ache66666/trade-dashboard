@@ -1,5 +1,7 @@
 'use strict';
 
+const { getRuntimeInfo } = require('./runtime-info');
+
 function positiveInteger(name, fallback) {
   const value = Number(process.env[name]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -21,6 +23,7 @@ function appEnvironment() {
 
 const appEnv = appEnvironment();
 const databaseUrl = process.env.DATABASE_URL;
+const runtime = getRuntimeInfo(process.env);
 
 if (!databaseUrl) throw new Error('缺少 DATABASE_URL，无法连接 PostgreSQL');
 
@@ -33,5 +36,8 @@ module.exports = Object.freeze({
   port: positiveInteger('PORT', 4173),
   databasePoolMax: positiveInteger('DATABASE_POOL_MAX', 10),
   databaseIdleTimeoutMs: positiveInteger('DATABASE_IDLE_TIMEOUT_MS', 30000),
-  databaseConnectionTimeoutMs: positiveInteger('DATABASE_CONNECTION_TIMEOUT_MS', 10000)
+  databaseConnectionTimeoutMs: positiveInteger('DATABASE_CONNECTION_TIMEOUT_MS', 10000),
+  commit: runtime.commit,
+  version: runtime.version,
+  deployedAt: runtime.deployedAt
 });

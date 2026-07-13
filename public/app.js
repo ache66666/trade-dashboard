@@ -375,5 +375,6 @@
 
   createStageBox();
   if (publicConfig.environment === 'staging') byId('environmentBadge').hidden = false;
+  report('Runtime', 'ready', null, (publicConfig.environment || 'unknown') + ' commit=' + (publicConfig.commit || 'unknown') + ' version=' + (publicConfig.version || 'unknown'));
   loadDashboard();
 }());

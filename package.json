@@ -5,7 +5,9 @@
   "description": "交易员市场数据工作台",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed:staging": "node scripts/seed-staging.js",
+    "seed:staging:clean": "node scripts/clean-staging-seed.js"
   },
   "engines": {
     "node": ">=22.5"

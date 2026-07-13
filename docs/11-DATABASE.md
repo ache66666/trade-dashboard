@@ -132,6 +132,34 @@ erDiagram
 
 具体检查步骤见 [运维手册的 Identity Sequence](09-OPERATIONS.md#identity-sequence)。
 
+## Staging Seed
+
+Seed 机制提供5条代表性指标和2条宏观事件，覆盖利率、外汇、股票、商品和波动率。所有 symbol 使用 `STG_*`，名称包含 `[STAGING TEST]`，来源固定为 `STAGING SEED`，不会与正式数据混淆。
+
+安全条件：
+
+- `APP_ENV` 必须严格等于 `staging`。
+- `STAGING_SEED_CONFIRM` 必须严格等于 `staging`。
+- 安全检查在导入数据库连接模块前执行。
+- Production 环境立即报错退出。
+- 不自动清空或覆盖非 Seed 数据。
+
+幂等策略：指标按唯一 `symbol` upsert；事件按时间、名称和来源做存在性检查。重复执行仍保持5条指标和2条事件。
+
+```powershell
+$env:APP_ENV='staging'
+$env:STAGING_SEED_CONFIRM='staging'
+npm run seed:staging
+```
+
+可选清理命令只删除专用 symbol/source：
+
+```powershell
+npm run seed:staging:clean
+```
+
+不得把 Seed 命令加入 Production workflow，也不得使用 Production `DATABASE_URL`。
+
 ## 外键
 
 当前没有外键。未来引入用户、来源、历史值、Watchlist 或 Alerts 时，不应直接添加弱约束字段；需要明确：

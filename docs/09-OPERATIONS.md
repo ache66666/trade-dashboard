@@ -180,6 +180,28 @@ SELECT pg_get_serial_sequence('public.macro_events', 'id');
 - 兼容测试页面或工具至少保留到相关多设备验收完成。
 - 定期检查 Staging 配置是否与 Production 架构一致但密钥不同。
 
+### Staging Seed 运维
+
+Seed 只用于独立 Staging 数据库，不自动随部署执行。运行前核对 Staging URL、Health 环境和数据库基线，并在当前 shell 显式设置：
+
+```powershell
+$env:APP_ENV='staging'
+$env:STAGING_SEED_CONFIRM='staging'
+npm run seed:staging
+```
+
+连接信息仍通过受控的 `DATABASE_URL` 提供，不写入命令、日志或文档。脚本在加载数据库模块前验证环境与确认值；Production 会立即退出。
+
+清理只删除来源为 `STAGING SEED` 的专用记录：
+
+```powershell
+$env:APP_ENV='staging'
+$env:STAGING_SEED_CONFIRM='staging'
+npm run seed:staging:clean
+```
+
+Seed/cleanup 都不会清空数据库。执行后验证记录数、测试名称和 Production 基线。
+
 ## Production 运维
 
 - 只跟踪 `main`，只接受已在 Staging 验收的 commit。
@@ -187,6 +209,7 @@ SELECT pg_get_serial_sequence('public.macro_events', 'id');
 - 不在 Production 进行探索性数据修改或兼容实验。
 - 批量写入、迁移和恢复必须有备份、批准与回滚方案。
 - 发布后立即完成 Health 和关键业务冒烟验证。
+- 发布前后记录正式指标/事件数量，任何非预期变化立即停止并调查。
 
 ## 上线检查
 
@@ -197,8 +220,10 @@ SELECT pg_get_serial_sequence('public.macro_events', 'id');
 - [ ] `main` 只包含已验收变更
 - [ ] Render Production 部署 commit 正确
 - [ ] `/api/health` 返回 production/connected
+- [ ] Health Commit 与 main 发布 commit 一致
 - [ ] 页面、指标、事件、刷新和维护功能正常
 - [ ] 日志无新增高优先级错误
+- [ ] Production 数据条数与发布前基线一致
 
 ## 事故记录
 
