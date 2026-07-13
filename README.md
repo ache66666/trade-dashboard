@@ -74,3 +74,5 @@ Render Production 自动部署
 ```
 
 任何功能必须先使用 [Task 模板](docs/tasks/TEMPLATE.md) 建档，并遵循 [开发规范](docs/07-DEVELOPMENT.md)、[测试规范](docs/13-TESTING.md) 和 [贡献指南](docs/10-CONTRIBUTING.md)。提交代码时同步更新相关文档和 `docs/CHANGELOG.md`，详细发布规则见 [发布规范](docs/06-RELEASE.md)。
+
+Last CI validation: 2026-07-13 15:39:13 +08:00
