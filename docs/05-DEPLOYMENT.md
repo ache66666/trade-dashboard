@@ -1,0 +1,133 @@
+# 部署手册
+
+## 环境原则
+
+- 一套代码、两个长期环境。
+- Production 跟踪 `main`，Staging 跟踪 `staging`。
+- 两个环境必须使用不同的可写 PostgreSQL 数据库。
+- 禁止在代码、Git、日志或文档中写入真实连接串。
+- 应用启动只检查连接，不自动建表、种数据或迁移。
+
+## 环境变量
+
+| 变量 | 必需 | 建议值/说明 |
+| --- | --- | --- |
+| `APP_ENV` | 是 | Production=`production`；Staging=`staging`；本地=`development` |
+| `NODE_ENV` | 是 | Render 使用 `production` |
+| `DATABASE_URL` | 是 | 当前环境独立的 PostgreSQL Session pooler URL |
+| `DEBUG_PANEL_DEFAULT` | 否 | 默认 `false`；临时使用 `?debug=1` |
+| `LOG_LEVEL` | 否 | Production=`info`；Staging=`debug` |
+| `PORT` | 平台提供 | 本地默认 4173，Render 自动注入 |
+| `DATABASE_POOL_MAX` | 否 | 默认 10；小型 Staging 可设 5 |
+| `DATABASE_IDLE_TIMEOUT_MS` | 否 | 默认 30000 |
+| `DATABASE_CONNECTION_TIMEOUT_MS` | 否 | 默认 10000 |
+
+`.env.example` 只含占位值。本地真实值放入 `.env`，Render 真实值放入 Environment/Secret。
+
+## 本地运行
+
+```powershell
+pnpm install
+Copy-Item .env.example .env
+# 编辑 .env，使用开发或测试数据库
+node --env-file=.env server.js
+```
+
+检查：
+
+```text
+http://localhost:4173/
+http://localhost:4173/api/health
+```
+
+本地开发禁止默认连接 Production 数据库。需要验证写功能时必须使用开发或 Staging 数据库。
+
+## Supabase 数据库
+
+### Production
+
+保留现有正式 Supabase Project 和数据。不得重新执行迁移脚本覆盖数据，不得删除 `indicators` 或 `macro_events`。
+
+### Staging
+
+1. 创建独立 Supabase Project。
+2. 在 SQL Editor 执行 `sql/001_initial_schema.sql`。
+3. 获取 Session pooler `DATABASE_URL`。
+4. 在 Render Staging 配置该 URL。
+5. 导入明确允许的测试数据；不要让 Staging 写入 Production。
+6. 验证两个表存在、约束生效，并记录测试数据来源。
+
+如果尚未创建测试数据库，Staging Service 可以创建，但在配置独立 `DATABASE_URL` 前不得开放写操作验收。
+
+## Render Production
+
+- 现有地址：<https://trade-dashboard-kgof.onrender.com/>
+- Repository：`ache66666/trade-dashboard`
+- Branch：`main`
+- Build Command：`npm install`
+- Start Command：`npm start`
+- Health Check Path：`/api/health`
+
+环境变量：
+
+```text
+APP_ENV=production
+NODE_ENV=production
+DATABASE_URL=<Production Session pooler URL>
+DEBUG_PANEL_DEFAULT=false
+LOG_LEVEL=info
+```
+
+Production 页面不得显示 `STAGING`。`/api/health` 必须返回 `environment=production`。
+
+## Render Staging
+
+在 Render 创建新的 Web Service，不复制项目：
+
+1. `New +` → `Web Service`。
+2. 选择同一 GitHub 仓库。
+3. 名称建议 `trade-dashboard-staging`。
+4. Branch 选择 `staging`。
+5. Build Command 填 `npm install`。
+6. Start Command 填 `npm start`。
+7. Health Check Path 填 `/api/health`。
+8. 配置独立 Staging 数据库和以下变量。
+
+```text
+APP_ENV=staging
+NODE_ENV=production
+DATABASE_URL=<Staging Session pooler URL>
+DEBUG_PANEL_DEFAULT=false
+LOG_LEVEL=debug
+DATABASE_POOL_MAX=5
+```
+
+Staging 页面必须显示 `STAGING`，健康检查必须返回 `environment=staging`。
+
+## GitHub 与自动部署
+
+- feature 分支用于开发。
+- `staging` 是测试发布分支，Render Staging 自动部署。
+- `main` 是正式发布分支，Render Production 自动部署。
+- 不向 `main` 直接推送未在 Staging 验收的功能。
+
+## 部署验证
+
+每套环境至少验证：
+
+1. `/api/health` 返回 200、正确 `environment`、`database=connected`。
+2. 首页、详细数据、数据维护页面可访问。
+3. 指标和事件来自当前环境数据库。
+4. 新增/编辑测试仅写入对应数据库。
+5. 服务重启后数据仍存在。
+6. 浏览器控制台和 Render 日志无新增错误。
+7. Production 默认无诊断面板；必要时 `?debug=1` 可用。
+
+## 回滚
+
+1. 确认故障由最近部署引入。
+2. 在 Staging 复现并记录影响。
+3. 对故障提交创建 revert，不使用破坏性 reset 改写共享历史。
+4. 先部署 Staging 验证 revert。
+5. 再合并到 `main`，验证 Production 健康检查和关键页面。
+6. 数据库变更必须有单独、可验证的回滚方案。
