@@ -160,3 +160,4 @@ type: concise imperative summary
 - [运维手册](09-OPERATIONS.md)
 - [贡献指南](10-CONTRIBUTING.md)
 - [发布规范](06-RELEASE.md)
+- [测试规范](13-TESTING.md)

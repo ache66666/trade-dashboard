@@ -1,6 +1,6 @@
 # 运维手册
 
-本文覆盖 Render、Supabase、密钥、双环境上线和回滚。部署参数见 [部署手册](05-DEPLOYMENT.md)，发布权限与分支规则见 [发布规范](06-RELEASE.md)。
+本文覆盖 Render、Supabase、密钥、双环境上线和回滚。部署参数见 [部署手册](05-DEPLOYMENT.md)，发布权限与分支规则见 [发布规范](06-RELEASE.md)，上线验收见 [测试规范](13-TESTING.md)。
 
 ## 运维原则
 

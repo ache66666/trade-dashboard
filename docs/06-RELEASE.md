@@ -1,6 +1,6 @@
 # 发布规范
 
-编码与 Review 规则见 [开发规范](07-DEVELOPMENT.md)，具体贡献步骤见 [贡献指南](10-CONTRIBUTING.md)，运行操作见 [运维手册](09-OPERATIONS.md)。
+编码与 Review 规则见 [开发规范](07-DEVELOPMENT.md)，具体贡献步骤见 [贡献指南](10-CONTRIBUTING.md)，运行操作见 [运维手册](09-OPERATIONS.md)，发布门禁见 [测试规范](13-TESTING.md)。
 
 ## 强制流程
 

@@ -1,0 +1,65 @@
+name: Staging CI and Deploy
+
+on:
+  push:
+    branches:
+      - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: true
+
+jobs:
+  check-build:
+    name: Check and Build Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout staging commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Audit dependencies (non-blocking)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Check tracked JavaScript syntax
+        run: git ls-files -z '*.js' | xargs -0 -n1 node --check
+
+      - name: Run tests when configured
+        run: npm test --if-present
+
+      - name: Run lint when configured
+        run: npm run lint --if-present
+
+      - name: Build when configured
+        run: npm run build --if-present
+
+  deploy:
+    name: Deploy Staging
+    needs: check-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: staging
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK_URL }}
+
+    steps:
+      - name: Trigger Render Staging deploy
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
+        run: curl --fail --show-error --silent --request POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Explain skipped Staging deploy
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
+        run: echo "RENDER_STAGING_DEPLOY_HOOK_URL is not configured; CI passed without calling a deploy hook."

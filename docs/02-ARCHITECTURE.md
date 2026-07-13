@@ -31,6 +31,8 @@ Supabase PostgreSQL
 | `data/` | 本地 SQLite 备份；不参与线上运行且不提交 Git |
 | `docs/` | 产品、技术、运行、发布和决策记录 |
 
+数据库 schema 细节见 [数据库设计](11-DATABASE.md)，来源治理见 [数据源目录](12-DATA_SOURCE.md)，未来架构预留见 [ADMIN](future/ADMIN.md) 与 [AUTO_DATA](future/AUTO_DATA.md)。
+
 ## 数据流
 
 ```text

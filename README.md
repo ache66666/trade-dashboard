@@ -35,21 +35,29 @@ market-workbench/
 
 ## 文档导航
 
-- [产品说明](docs/00-PRODUCT.md)
-- [产品路线图](docs/01-ROADMAP.md)
-- [系统架构](docs/02-ARCHITECTURE.md)
-- [数据字典](docs/03-DATA_DICTIONARY.md)
-- [API 参考](docs/04-API.md)
-- [部署手册](docs/05-DEPLOYMENT.md)
-- [发布规范](docs/06-RELEASE.md)
-- [开发规范 / 工程规范](docs/07-DEVELOPMENT.md)
-- [Debug 手册](docs/08-DEBUG.md)
-- [运维手册](docs/09-OPERATIONS.md)
-- [贡献指南](docs/10-CONTRIBUTING.md)
+- [00 产品说明](docs/00-PRODUCT.md)
+- [01 产品路线图](docs/01-ROADMAP.md)
+- [02 系统架构](docs/02-ARCHITECTURE.md)
+- [03 数据字典](docs/03-DATA_DICTIONARY.md)
+- [04 API 参考](docs/04-API.md)
+- [05 部署手册与 GitHub Actions](docs/05-DEPLOYMENT.md)
+- [06 发布规范](docs/06-RELEASE.md)
+- [07 开发规范 / 工程规范](docs/07-DEVELOPMENT.md)
+- [08 Debug 手册](docs/08-DEBUG.md)
+- [09 运维手册](docs/09-OPERATIONS.md)
+- [10 贡献指南](docs/10-CONTRIBUTING.md)
+- [11 数据库设计](docs/11-DATABASE.md)
+- [12 数据源目录](docs/12-DATA_SOURCE.md)
+- [13 测试与上线 Checklist](docs/13-TESTING.md)
 - [Task 管理与模板](docs/tasks/TEMPLATE.md)
 - [变更记录](docs/CHANGELOG.md)
 - [架构决策记录](docs/decisions/)
 - [文档模板](docs/templates/)
+
+## 未来规划目录
+
+- [Admin 管理后台设计](docs/future/ADMIN.md)
+- [自动数据源设计](docs/future/AUTO_DATA.md)
 
 ## 开发流程
 
@@ -65,4 +73,4 @@ main branch
 Render Production 自动部署
 ```
 
-任何功能必须先使用 [Task 模板](docs/tasks/TEMPLATE.md) 建档，并遵循 [开发规范](docs/07-DEVELOPMENT.md) 和 [贡献指南](docs/10-CONTRIBUTING.md)。提交代码时同步更新相关文档和 `docs/CHANGELOG.md`，详细发布规则见 [发布规范](docs/06-RELEASE.md)。
+任何功能必须先使用 [Task 模板](docs/tasks/TEMPLATE.md) 建档，并遵循 [开发规范](docs/07-DEVELOPMENT.md)、[测试规范](docs/13-TESTING.md) 和 [贡献指南](docs/10-CONTRIBUTING.md)。提交代码时同步更新相关文档和 `docs/CHANGELOG.md`，详细发布规则见 [发布规范](docs/06-RELEASE.md)。

@@ -34,3 +34,5 @@
 - 自动交易或下单
 - 未经授权的商业数据分发
 - 用生成内容替代原始数据来源或专业判断
+
+未来 Admin 与自动数据源仅处于设计阶段，分别见 [ADMIN](future/ADMIN.md) 和 [AUTO_DATA](future/AUTO_DATA.md)。

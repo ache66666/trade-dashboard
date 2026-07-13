@@ -113,6 +113,63 @@ Staging 页面必须显示 `STAGING`，健康检查必须返回 `environment=sta
 - `main` 是正式发布分支，Render Production 自动部署。
 - 不向 `main` 直接推送未在 Staging 验收的功能。
 
+## GitHub Actions 自动化
+
+仓库包含两套独立 workflow：
+
+| Workflow | 触发分支 | GitHub Environment | Deploy Hook Secret | 目标 |
+| --- | --- | --- | --- | --- |
+| `.github/workflows/staging.yml` | `staging` push | `staging` | `RENDER_STAGING_DEPLOY_HOOK_URL` | 仅 Staging |
+| `.github/workflows/production.yml` | `main` push | `production` | `RENDER_PRODUCTION_DEPLOY_HOOK_URL` | 仅 Production |
+
+统一流水线：
+
+```text
+Push target branch
+      ↓
+npm install
+      ↓
+npm audit（非阻塞、需评估）
+      ↓
+JavaScript syntax + test + optional lint
+      ↓
+optional build
+      ↓
+Render Deploy Hook（Secret 存在时）
+```
+
+### GitHub 配置
+
+1. Repository → Settings → Environments。
+2. 创建 `staging` 和 `production` 两个 GitHub Environment。
+3. 在 `staging` Environment Secret 添加 `RENDER_STAGING_DEPLOY_HOOK_URL`。
+4. 在 `production` Environment Secret 添加 `RENDER_PRODUCTION_DEPLOY_HOOK_URL`。
+5. 可为 production Environment 添加 required reviewers，防止未经批准触发正式部署。
+6. Secret 值只能来自对应 Render Service 的 Deploy Hook，禁止交叉使用。
+
+如果 Secret 未配置，workflow 仍执行检查，但明确跳过 Deploy Hook。
+
+### Render 配置选择
+
+推荐让 GitHub Actions 成为部署门禁：
+
+1. 在 Render 分别创建 Staging/Production Deploy Hook。
+2. 把 Hook 放入对应 GitHub Environment Secret。
+3. 关闭对应 Render Service 的 branch auto-deploy，避免 push 时绕过 CI 或重复部署。
+4. workflow 检查通过后再调用 Hook。
+
+如果继续使用 Render 原生 branch auto-deploy，则不要配置 Deploy Hook Secret，以避免同一 commit 部署两次；但此模式无法保证 Render 一定等待 GitHub Actions 检查通过。
+
+### 权限与隔离
+
+- workflow 权限仅为 `contents: read`。
+- Staging workflow 不监听 `main`，也不引用 Production Hook。
+- Production workflow 只监听 `main`，也不引用 Staging Hook。
+- Hook Secret 不传给浏览器、应用进程或日志。
+- workflow 变更本身必须先在 `staging` 验证，再进入 `main`。
+
+自动化验收标准见 [测试规范](13-TESTING.md#自动化检查)。
+
 ## 部署验证
 
 每套环境至少验证：

@@ -1,6 +1,6 @@
 # 贡献指南
 
-所有贡献必须遵循 [开发规范](07-DEVELOPMENT.md)、[发布规范](06-RELEASE.md) 和 [安全/运维要求](09-OPERATIONS.md)。
+所有贡献必须遵循 [开发规范](07-DEVELOPMENT.md)、[测试规范](13-TESTING.md)、[发布规范](06-RELEASE.md) 和 [安全/运维要求](09-OPERATIONS.md)。
 
 ## 1. 创建任务
 
