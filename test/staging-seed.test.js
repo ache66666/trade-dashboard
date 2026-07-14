@@ -21,7 +21,7 @@ class FakeClient {
     if (sql.startsWith('SELECT symbol, name, category, source FROM indicators')) {
       return { rows:Array.from(this.indicators.values()).map(item => ({ symbol:item.symbol, name:item.name, category:item.category, source:item.source })) };
     }
-    if (sql.startsWith('SELECT event_time, name, source FROM macro_events')) {
+    if (sql.startsWith('SELECT to_char(event_time')) {
       return { rows:Array.from(this.events.values()).map(item => ({ event_time:item.event_time, name:item.name, source:item.source })) };
     }
     if (sql.startsWith('INSERT INTO indicators')) {

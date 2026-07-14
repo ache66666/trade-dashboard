@@ -72,7 +72,8 @@ async function inspectStagingSeed(client) {
     [indicators.map(item => item.symbol)]
   );
   const eventResult = await client.query(
-    'SELECT event_time, name, source FROM macro_events WHERE source=$1 AND name = ANY($2::text[])',
+    `SELECT to_char(event_time, 'YYYY-MM-DD"T"HH24:MI:SS') AS event_time, name, source
+       FROM macro_events WHERE source=$1 AND name = ANY($2::text[])`,
     [SEED_SOURCE, events.map(item => item.name)]
   );
   const existingSymbols = new Set(indicatorResult.rows.map(row => row.symbol));
@@ -91,7 +92,8 @@ async function validateSeedTransaction(client) {
     [indicators.map(item => item.symbol)]
   );
   const eventResult = await client.query(
-    'SELECT event_time, name, source FROM macro_events WHERE source=$1 AND name = ANY($2::text[])',
+    `SELECT to_char(event_time, 'YYYY-MM-DD"T"HH24:MI:SS') AS event_time, name, source
+       FROM macro_events WHERE source=$1 AND name = ANY($2::text[])`,
     [SEED_SOURCE, events.map(item => item.name)]
   );
   if (indicatorResult.rows.length !== indicators.length) throw new Error('Staging seed validation failed: indicator count mismatch.');
