@@ -153,6 +153,7 @@ $env:STAGING_SEED_CONFIRM='staging'
 $env:STAGING_DATABASE_PROJECT_REF='<Staging Supabase project ref>'
 npm run seed:staging:dry-run
 npm run seed:staging
+npm run verify:staging-seed
 ```
 
 dry-run 只读取目标库并输出预计新增/更新数量。可选清理命令只删除同时匹配固定 symbol 与 `[STAGING TEST]` 名称的指标，以及固定测试名称/来源的事件：
