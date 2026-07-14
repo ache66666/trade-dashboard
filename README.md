@@ -15,7 +15,7 @@ node --env-file=.env server.js
 
 浏览器访问 `http://localhost:4173`。完整本地配置见 [部署文档](docs/05-DEPLOYMENT.md)。
 
-Staging 测试数据使用受保护命令初始化，必须同时设置 `APP_ENV=staging` 与 `STAGING_SEED_CONFIRM=staging`，详见 [数据库设计](docs/11-DATABASE.md#staging-seed)。Production 环境会在连接数据库前拒绝执行。
+Staging 测试数据使用受保护命令初始化，必须同时设置 `APP_ENV=staging`、`STAGING_SEED_CONFIRM=staging`，并用 `STAGING_DATABASE_PROJECT_REF` 校验连接目标，详见 [数据库设计](docs/11-DATABASE.md#staging-seed)。Production 环境会在连接数据库前拒绝执行。
 
 ## 目录结构
 

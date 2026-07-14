@@ -25,6 +25,8 @@
 | `DATABASE_CONNECTION_TIMEOUT_MS` | 否 | 默认 10000 |
 | `APP_VERSION` | 否 | 覆盖 `package.json` 版本；通常不必设置 |
 | `DEPLOYED_AT` | 否 | 只有发布系统能提供可靠 ISO 时间时设置 |
+| `STAGING_DATABASE_PROJECT_REF` | Seed 时必填 | Staging Supabase 项目标识；必须与 `DATABASE_URL` 中的项目一致 |
+| `STAGING_SEED_CONFIRM` | Seed 时必填 | 固定为 `staging`；Production 不配置 |
 
 `.env.example` 只含占位值。本地真实值放入 `.env`，Render 真实值放入 Environment/Secret。
 

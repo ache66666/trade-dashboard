@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
+    "seed:staging:dry-run": "node scripts/seed-staging.js --dry-run",
     "seed:staging": "node scripts/seed-staging.js",
     "seed:staging:clean": "node scripts/clean-staging-seed.js"
   },

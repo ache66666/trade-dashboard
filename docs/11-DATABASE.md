@@ -134,25 +134,28 @@ erDiagram
 
 ## Staging Seed
 
-Seed 机制提供5条代表性指标和2条宏观事件，覆盖利率、外汇、股票、商品和波动率。所有 symbol 使用 `STG_*`，名称包含 `[STAGING TEST]`，来源固定为 `STAGING SEED`，不会与正式数据混淆。
+Seed 机制提供10条代表性指标和2条宏观事件，覆盖流动性、利率、国债期货、外汇、股票、商品、波动率、信用和宏观日历。指标使用页面已有稳定 symbol，名称包含 `[STAGING TEST]`；普通测试来源为 `STAGING SEED`，待录入样本来源为 `待手工录入`，因此既能驱动首页代表卡片，也不会与正式数据混淆。
 
 安全条件：
 
 - `APP_ENV` 必须严格等于 `staging`。
 - `STAGING_SEED_CONFIRM` 必须严格等于 `staging`。
+- `STAGING_DATABASE_PROJECT_REF` 必须存在，并与 `DATABASE_URL` 用户名中的 Supabase 项目标识完全一致。
 - 安全检查在导入数据库连接模块前执行。
 - Production 环境立即报错退出。
 - 不自动清空或覆盖非 Seed 数据。
 
-幂等策略：指标按唯一 `symbol` upsert；事件按时间、名称和来源做存在性检查。重复执行仍保持5条指标和2条事件。
+幂等策略：指标按唯一 `symbol` upsert；事件按时间、名称和来源做存在性检查。所有写入在一个事务中完成，提交前校验 Seed 数量、唯一 symbol 和关键标识；失败则回滚。重复执行仍保持10条指标和2条事件。
 
 ```powershell
 $env:APP_ENV='staging'
 $env:STAGING_SEED_CONFIRM='staging'
+$env:STAGING_DATABASE_PROJECT_REF='<Staging Supabase project ref>'
+npm run seed:staging:dry-run
 npm run seed:staging
 ```
 
-可选清理命令只删除专用 symbol/source：
+dry-run 只读取目标库并输出预计新增/更新数量。可选清理命令只删除同时匹配固定 symbol 与 `[STAGING TEST]` 名称的指标，以及固定测试名称/来源的事件：
 
 ```powershell
 npm run seed:staging:clean

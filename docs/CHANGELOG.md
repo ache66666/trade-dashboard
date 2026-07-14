@@ -12,6 +12,7 @@ v0.1–v0.5 根据现有 Git 历史整理，目前未补建对应 Git tag。
 - 增加开发、Debug、运维、贡献和 Task 管理规范。
 - 增加 GitHub Actions、数据库设计、数据源、测试规范及未来架构设计。
 - 增加部署Commit识别、Staging安全Seed/Cleanup和基础自动化测试。
+- 扩充 Staging Seed 至10条指标/2条事件，增加 dry-run、Supabase 项目标识校验和事务内结果验证。
 
 ## [0.5.0] - 2026-07-12
 

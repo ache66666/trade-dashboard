@@ -187,20 +187,23 @@ Seed 只用于独立 Staging 数据库，不自动随部署执行。运行前核
 ```powershell
 $env:APP_ENV='staging'
 $env:STAGING_SEED_CONFIRM='staging'
+$env:STAGING_DATABASE_PROJECT_REF='<Staging Supabase project ref>'
+npm run seed:staging:dry-run
 npm run seed:staging
 ```
 
-连接信息仍通过受控的 `DATABASE_URL` 提供，不写入命令、日志或文档。脚本在加载数据库模块前验证环境与确认值；Production 会立即退出。
+连接信息仍通过受控的 `DATABASE_URL` 提供，不写入命令、日志或文档。脚本在加载数据库模块前验证环境、确认值，以及连接 URL 中的 Supabase 项目标识；任一项不一致立即退出。先运行 dry-run，记录预计 insert/update 数量，再执行写入。Production 会在连接前立即退出。
 
 清理只删除来源为 `STAGING SEED` 的专用记录：
 
 ```powershell
 $env:APP_ENV='staging'
 $env:STAGING_SEED_CONFIRM='staging'
+$env:STAGING_DATABASE_PROJECT_REF='<Staging Supabase project ref>'
 npm run seed:staging:clean
 ```
 
-Seed/cleanup 都不会清空数据库。执行后验证记录数、测试名称和 Production 基线。
+Seed/cleanup 都不会清空数据库。Seed 在单一事务中 upsert 专用记录并在提交前校验；cleanup 只匹配固定 symbol、测试名称和事件来源。执行后验证记录数、分类、重复 symbol、必填字段、测试名称和 Production 基线。
 
 ## Production 运维
 
