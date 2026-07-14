@@ -25,7 +25,7 @@ GitHub Actions 在目标分支 push 时执行：
 
 工作流说明见 [部署手册](05-DEPLOYMENT.md#github-actions-自动化)。audit 非阻塞不代表可以忽略高风险漏洞；必须在发布评审中记录处理决定。
 
-当前基础测试覆盖：Health payload状态/环境/版本、Commit缺失回退`unknown`、Production拒绝Seed、Staging 项目标识匹配，以及 Seed 重复执行无逻辑重复。测试使用纯函数、子进程安全检查和内存 Fake Client，不连接 Production 数据库。
+当前基础测试覆盖：Health payload状态/环境/版本、Commit缺失回退`unknown`、Production拒绝Seed、Staging 项目标识匹配、Seed 幂等，以及 Trading Journal 主线/长度/观察数量/证据重复/状态/日期校验。单元测试不连接 Production 数据库。
 
 ## 测试层级
 
@@ -43,6 +43,7 @@ GitHub Actions 在目标分支 push 时执行：
 - `/api/dashboard-compat`
 - `/api/indicators`
 - `/api/events`
+- `/api/journal/:date` GET/PUT、空状态、持久化和输入拒绝
 - Staging 中的指标新增、编辑和事件新增
 - Staging 中的刷新成功、部分失败与超时
 

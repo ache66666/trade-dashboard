@@ -4,6 +4,7 @@ const path = require('node:path');
 const config = require('./config');
 const logger = require('./logger');
 const { handleHealth } = require('./health');
+const { validateJournal, validDate } = require('./journal');
 const { getPool, query, closePool } = require('./database');
 
 const PORT = config.port;
@@ -170,6 +171,33 @@ const server = http.createServer(async (req,res)=>{
     if (url.pathname === '/api/events' && req.method === 'GET') {
       const result = await query('SELECT * FROM macro_events ORDER BY event_time');
       return json(res,200,result.rows.map(apiRow));
+    }
+    const journalMatch=url.pathname.match(/^\/api\/journal\/(\d{4}-\d{2}-\d{2})$/);
+    if(journalMatch && req.method==='GET') {
+      if(!validDate(journalMatch[1])) return json(res,400,{error:'日志日期无效'});
+      const result=await query('SELECT * FROM daily_market_notes WHERE note_date=$1',[journalMatch[1]]);
+      return json(res,200,{date:journalMatch[1],note:apiRow(result.rows[0]||null)});
+    }
+    if(journalMatch && req.method==='PUT') {
+      if(!validDate(journalMatch[1])) return json(res,400,{error:'日志日期无效'});
+      const parsed=validateJournal(await body(req));
+      if(parsed.error)return json(res,400,{error:parsed.error});
+      const x=parsed.value;
+      const symbols=Array.from(new Set(x.supporting_evidence.concat(x.opposing_evidence).map(item=>item.symbol)));
+      if(symbols.length) {
+        const known=await query('SELECT symbol FROM indicators WHERE symbol=ANY($1::text[])',[symbols]);
+        const knownSymbols=new Set(known.rows.map(row=>row.symbol));
+        const missing=symbols.filter(symbol=>!knownSymbols.has(symbol));
+        if(missing.length)return json(res,400,{error:`证据指标不存在：${missing.join(', ')}`});
+      }
+      const result=await query(`INSERT INTO daily_market_notes
+        (note_date,thesis,summary,supporting_evidence,opposing_evidence,watchlist)
+        VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb)
+        ON CONFLICT (note_date) DO UPDATE SET thesis=EXCLUDED.thesis,summary=EXCLUDED.summary,
+          supporting_evidence=EXCLUDED.supporting_evidence,opposing_evidence=EXCLUDED.opposing_evidence,
+          watchlist=EXCLUDED.watchlist,updated_at=CURRENT_TIMESTAMP
+        RETURNING *`,[journalMatch[1],x.thesis,x.summary,JSON.stringify(x.supporting_evidence),JSON.stringify(x.opposing_evidence),JSON.stringify(x.watchlist)]);
+      return json(res,200,{date:journalMatch[1],note:apiRow(result.rows[0])});
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
       const results = await refreshAll();

@@ -4,6 +4,7 @@
   var events = [];
   var activeCategory = '全部';
   var editingIndicatorId = null;
+  var journalSymbols = ['DR007', 'CN10Y', 'T.CFE', 'DXY', 'USDCNY', 'CSI300', 'SPX', 'GOLD', 'WTI', 'VIX', 'MOVE'];
   var categories = ['流动性', '利率', '国债期货', '外汇', '股票', '商品', '波动率', '信用', '宏观日历'];
   var groups = [
     { name: 'Rates', label: '利率', detail: '利率', symbols: ['DR007', 'CN10Y', 'US10Y', 'T.CFE'] },
@@ -20,6 +21,7 @@
   function byId(id) { return document.getElementById(id); }
   function all(selector) { return document.querySelectorAll(selector); }
   function text(value) { return value === null || value === undefined || value === '' ? '暂无数据' : String(value); }
+  function escapeHtml(value) { return String(value === null || value === undefined ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
   function createStageBox() {
     if (!debugEnabled) return;
@@ -163,7 +165,9 @@
     var i;
     for (i = 0; i < navs.length; i += 1) navs[i].className = navs[i].getAttribute('data-page') === page ? 'nav active' : 'nav';
     for (i = 0; i < pages.length; i += 1) pages[i].className = pages[i].id === page ? 'page active' : 'page';
-    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'details' ? '详细数据' : '数据维护';
+    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'journal' ? '交易日志' : page === 'details' ? '详细数据' : '数据维护';
+    byId('pageDesc').textContent = page === 'journal' ? '记录今天的判断、证据与明日验证事项。' : page === 'overview' ? '用最少的数据，看清今天的市场方向。' : page === 'details' ? '按品类查看全部市场指标。' : '维护手工指标与宏观事件。';
+    if (page === 'journal') loadJournal();
   }
 
   function renderDetails() {
@@ -260,6 +264,156 @@
     xhr.send(payload === null ? null : JSON.stringify(payload));
   }
 
+  function localDate() {
+    var now = new Date();
+    var month = String(now.getMonth() + 1);
+    var day = String(now.getDate());
+    return now.getFullYear() + '-' + (month.length < 2 ? '0' + month : month) + '-' + (day.length < 2 ? '0' + day : day);
+  }
+
+  function renderJournalSnapshot() {
+    var root = byId('journalSnapshot');
+    var html = '';
+    var i;
+    var item;
+    for (i = 0; i < journalSymbols.length; i += 1) {
+      item = findSymbol(journalSymbols[i]);
+      if (!item) {
+        html += '<div class="journal-market is-missing"><b>' + journalSymbols[i] + '</b><small>暂无数据</small><strong>—</strong></div>';
+        continue;
+      }
+      html += '<div class="journal-market"><b>' + escapeHtml(item.name) + '</b><small>' + escapeHtml(item.symbol) + '</small><strong>' + escapeHtml(simpleValue(item)) + '</strong><em class="' + simpleClass(item) + '">' + escapeHtml(simpleChange(item)) + '</em></div>';
+    }
+    root.innerHTML = html;
+  }
+
+  function evidenceMap(items) {
+    var result = {};
+    var i;
+    for (i = 0; i < (items || []).length; i += 1) result[items[i].symbol] = items[i].note || '';
+    return result;
+  }
+
+  function renderJournalEvidence(kind, saved) {
+    var root = byId(kind === 'support' ? 'supportEvidence' : 'opposeEvidence');
+    var notes = evidenceMap(saved);
+    var html = '';
+    var i;
+    var item;
+    for (i = 0; i < journalSymbols.length; i += 1) {
+      item = findSymbol(journalSymbols[i]);
+      if (!item) continue;
+      html += '<div class="evidence-row"><input type="checkbox" data-evidence-check="' + kind + '" data-symbol="' + escapeHtml(item.symbol) + '"' + (Object.prototype.hasOwnProperty.call(notes, item.symbol) ? ' checked' : '') + '><label><b>' + escapeHtml(item.name) + '</b><small>' + escapeHtml(item.symbol) + ' · ' + escapeHtml(simpleChange(item)) + '</small></label><input class="evidence-note" maxlength="200" data-evidence-note="' + kind + '" data-symbol="' + escapeHtml(item.symbol) + '" placeholder="记录这项数据说明了什么" value="' + escapeHtml(notes[item.symbol] || '') + '"></div>';
+    }
+    root.innerHTML = html || '<p class="empty">暂无可选指标</p>';
+  }
+
+  function collectEvidence(kind) {
+    var checks = all('[data-evidence-check="' + kind + '"]');
+    var notes = all('[data-evidence-note="' + kind + '"]');
+    var result = [];
+    var i;
+    var j;
+    var symbol;
+    var note;
+    for (i = 0; i < checks.length; i += 1) {
+      if (!checks[i].checked) continue;
+      symbol = checks[i].getAttribute('data-symbol');
+      note = '';
+      for (j = 0; j < notes.length; j += 1) if (notes[j].getAttribute('data-symbol') === symbol) { note = notes[j].value; break; }
+      result.push({ symbol: symbol, note: note });
+    }
+    return result;
+  }
+
+  function journalPayload() {
+    var form = byId('journalForm');
+    var watchlist = [];
+    var i;
+    var title;
+    var note;
+    for (i = 0; i < 3; i += 1) {
+      title = form.elements['watch_title_' + i].value;
+      note = form.elements['watch_note_' + i].value;
+      if (title || note) watchlist.push({ title:title, note:note, status:form.elements['watch_status_' + i].value });
+    }
+    return {
+      thesis:form.elements.thesis.value,
+      summary:form.elements.summary.value,
+      supporting_evidence:collectEvidence('support'),
+      opposing_evidence:collectEvidence('oppose'),
+      watchlist:watchlist
+    };
+  }
+
+  function populateJournal(note) {
+    var form = byId('journalForm');
+    var i;
+    var item;
+    form.reset();
+    form.elements.thesis.value = note ? note.thesis : '';
+    form.elements.summary.value = note ? note.summary : '';
+    renderJournalEvidence('support', note ? note.supporting_evidence : []);
+    renderJournalEvidence('oppose', note ? note.opposing_evidence : []);
+    for (i = 0; i < 3; i += 1) {
+      item = note && note.watchlist ? note.watchlist[i] : null;
+      form.elements['watch_title_' + i].value = item ? item.title : '';
+      form.elements['watch_note_' + i].value = item ? item.note : '';
+      form.elements['watch_status_' + i].value = item ? item.status : '未验证';
+    }
+    byId('journalSummaryCount').textContent = form.elements.summary.value.length + ' / 200';
+    byId('journalSaveState').textContent = note ? '已保存 · ' + text(note.updated_at).substring(0, 16).replace('T', ' ') : '尚未保存';
+    byId('journalSaveState').className = note ? 'is-saved' : '';
+    byId('journalError').textContent = '';
+  }
+
+  function journalRequest(method, url, payload, done) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    xhr.timeout = 10000;
+    if (payload) xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onload = function () {
+      var data;
+      try {
+        data = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status < 200 || xhr.status >= 300) throw new Error(data.error || ('HTTP ' + xhr.status));
+        done(null, data);
+      } catch (error) { done(error); }
+    };
+    xhr.onerror = function () { done(new Error('网络错误')); };
+    xhr.ontimeout = function () { done(new Error('请求超时')); };
+    xhr.send(payload ? JSON.stringify(payload) : null);
+  }
+
+  function loadJournal() {
+    var date = byId('journalDate').value || localDate();
+    byId('journalSaveState').textContent = '读取中…';
+    journalRequest('GET', '/api/journal/' + encodeURIComponent(date), null, function (error, data) {
+      if (error) { byId('journalError').textContent = error.message; byId('journalSaveState').textContent = '读取失败'; return; }
+      populateJournal(data.note);
+      report('Journal', 'loaded', null, date);
+    });
+  }
+
+  function saveJournal(event) {
+    var button = byId('journalSaveBtn');
+    var date = byId('journalDate').value;
+    var payload = journalPayload();
+    event.preventDefault();
+    byId('journalError').textContent = '';
+    if (!payload.thesis || !payload.summary.trim()) { byId('journalError').textContent = '请选择主线并填写一句话判断'; return; }
+    button.disabled = true;
+    button.textContent = '保存中…';
+    journalRequest('PUT', '/api/journal/' + encodeURIComponent(date), payload, function (error, data) {
+      button.disabled = false;
+      button.textContent = '保存今日日志';
+      if (error) { byId('journalError').textContent = error.message; report('Journal', 'failed', error, date); return; }
+      populateJournal(data.note);
+      showError('交易日志已保存');
+      report('Journal', 'saved', null, date);
+    });
+  }
+
   function refreshMarketData() {
     var button = byId('refreshBtn');
     var xhr = new XMLHttpRequest();
@@ -293,6 +447,10 @@
     byId('newBtn').onclick = function () { openIndicatorDialog(null); };
     byId('closeDialog').onclick = function () { byId('editDialog').close(); };
     byId('cancelDialog').onclick = function () { byId('editDialog').close(); };
+    byId('journalDate').value = byId('journalDate').value || localDate();
+    byId('journalDate').onchange = loadJournal;
+    byId('journalForm').onsubmit = saveJournal;
+    byId('journalForm').elements.summary.oninput = function () { byId('journalSummaryCount').textContent = this.value.length + ' / 200'; };
     categorySelect.innerHTML = '';
     for (i = 0; i < categories.length - 1; i += 1) {
       option = document.createElement('option');
@@ -317,6 +475,9 @@
     renderTabs();
     renderDetails();
     renderEditor();
+    renderJournalSnapshot();
+    renderJournalEvidence('support', []);
+    renderJournalEvidence('oppose', []);
     runStage.last = 'listeners';
   }
 
@@ -360,6 +521,7 @@
           events = data.events;
           report('XHR', 'success', null, 'indicators=' + indicators.length + ' events=' + events.length);
           runStages();
+          if (window.location.search.indexOf('page=journal') >= 0) showPage('journal');
         } catch (error) {
           report('XHR onload', 'failed', error, 'responseLength=' + (xhr.responseText ? xhr.responseText.length : 0));
         }
