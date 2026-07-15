@@ -8,6 +8,8 @@ const SAFE_DATABASE_URL = 'postgresql://test:test@127.0.0.1:6543/test';
 const indicators = [{ id:1, symbol:'TEST', name:'Test indicator' }];
 const events = [{ id:1, name:'Test event' }];
 let authCalls = 0;
+let dataApiCalls = 0;
+let lastDataApiRequest = null;
 let queryCalls = 0;
 let server;
 let baseUrl;
@@ -28,11 +30,20 @@ before(async () => {
   process.env.SUPABASE_PUBLISHABLE_KEY = 'test-publishable-key';
 
   global.fetch = async function (url, options) {
+    if (String(url).indexOf('/rest/v1/') >= 0) {
+      dataApiCalls += 1;
+      lastDataApiRequest = { url:String(url), options };
+      assert.equal(options.headers.apikey, 'test-publishable-key');
+      if (options.headers.Authorization === 'Bearer data-error') return authResponse(500, { message:'DATA_API_INTERNAL_MARKER' });
+      if (String(url).indexOf('/rest/v1/indicators') >= 0) return authResponse(200, [{ symbol:'TEST' }]);
+      if (options.method === 'POST') return authResponse(200, [{ id:1, ...JSON.parse(options.body) }]);
+      return authResponse(200, []);
+    }
     var token = String(options.headers.Authorization || '').replace(/^Bearer\s+/i, '');
     authCalls += 1;
     assert.equal(url, 'https://test.supabase.co/auth/v1/user');
     assert.equal(options.headers.apikey, 'test-publishable-key');
-    if (token === 'valid-token') return authResponse(200, { id:'user-123', email:'trader@example.com' });
+    if (token === 'valid-token' || token === 'data-error') return authResponse(200, { id:'user-123', email:'trader@example.com' });
     if (token === 'service-error') return authResponse(500, { message:'INTERNAL_AUTH_MARKER' });
     return authResponse(401, { message:'JWT_INTERNAL_MARKER' });
   };
@@ -66,11 +77,16 @@ after(async () => {
   if (server && server.listening) await new Promise(resolve => server.close(resolve));
 });
 
-function request(method, pathname, token) {
+function request(method, pathname, token, payload, extraHeaders) {
   return new Promise((resolve, reject) => {
+    const requestBody = payload === undefined ? null : JSON.stringify(payload);
     const req = http.request(new URL(pathname, baseUrl), {
       method,
-      headers:token ? { Authorization:'Bearer ' + token } : {}
+      headers:{
+        ...(token ? { Authorization:'Bearer ' + token } : {}),
+        ...(requestBody ? { 'Content-Type':'application/json', 'Content-Length':Buffer.byteLength(requestBody) } : {}),
+        ...(extraHeaders || {})
+      }
     }, res => {
       let text = '';
       res.setEncoding('utf8');
@@ -82,7 +98,7 @@ function request(method, pathname, token) {
       }));
     });
     req.on('error', reject);
-    req.end();
+    req.end(requestBody);
   });
 }
 
@@ -146,11 +162,68 @@ test('public Dashboard remains available without login', async () => {
 test('Journal read and write require Auth before database access', async () => {
   for (const method of ['GET', 'PUT']) {
     const beforeQueries = queryCalls;
+    const beforeDataApi = dataApiCalls;
     const response = await request(method, '/api/journal/2026-07-15');
     assert.equal(response.status, 401);
     assert.deepEqual(response.json, { error:'Authentication required' });
     assert.equal(queryCalls, beforeQueries);
+    assert.equal(dataApiCalls, beforeDataApi);
   }
+});
+
+test('invalid Journal token returns 401 without Data API access', async () => {
+  const beforeDataApi = dataApiCalls;
+  const response = await request('GET', '/api/journal/2026-07-15', 'invalid-token');
+  assert.equal(response.status, 401);
+  assert.deepEqual(response.json, { error:'Authentication required' });
+  assert.equal(dataApiCalls, beforeDataApi);
+});
+
+test('authenticated Journal read uses Data API with the verified token and not pg', async () => {
+  const beforeQueries = queryCalls;
+  const beforeDataApi = dataApiCalls;
+  const response = await request('GET', '/api/journal/2026-07-15?user_id=attacker', 'valid-token', undefined, { 'X-User-Id':'attacker' });
+  assert.equal(response.status, 200);
+  assert.equal(response.json.note, null);
+  assert.equal(queryCalls, beforeQueries);
+  assert.equal(dataApiCalls, beforeDataApi + 1);
+  assert.equal(lastDataApiRequest.options.headers.Authorization, 'Bearer valid-token');
+  assert.equal(new URL(lastDataApiRequest.url).searchParams.get('user_id'), 'eq.user-123');
+});
+
+test('authenticated Journal write uses only Data API and ignores client user_id', async () => {
+  const beforeQueries = queryCalls;
+  const beforeDataApi = dataApiCalls;
+  const payload = {
+    user_id:'attacker',
+    thesis:require('../journal').THESIS_OPTIONS[0],
+    summary:'Verified user journal',
+    supporting_evidence:[],
+    opposing_evidence:[],
+    watchlist:[]
+  };
+  const response = await request('PUT', '/api/journal/2026-07-15?user_id=attacker', 'valid-token', payload, { 'X-User-Id':'attacker' });
+  assert.equal(response.status, 200);
+  assert.equal(queryCalls, beforeQueries);
+  assert.equal(dataApiCalls, beforeDataApi + 1);
+  assert.equal(lastDataApiRequest.options.headers.Authorization, 'Bearer valid-token');
+  assert.equal(JSON.parse(lastDataApiRequest.options.body).user_id, 'user-123');
+  assert.equal(new URL(lastDataApiRequest.url).searchParams.get('on_conflict'), 'user_id,note_date');
+});
+
+test('Journal Auth provider failures return 503 without Data API access', async () => {
+  const beforeDataApi = dataApiCalls;
+  const response = await request('GET', '/api/journal/2026-07-15', 'service-error');
+  assert.equal(response.status, 503);
+  assert.deepEqual(response.json, { error:'Authentication service unavailable' });
+  assert.equal(dataApiCalls, beforeDataApi);
+});
+
+test('Journal Data API failures return a sanitized 503', async () => {
+  const response = await request('GET', '/api/journal/2026-07-15', 'data-error');
+  assert.equal(response.status, 503);
+  assert.deepEqual(response.json, { error:'Journal data service unavailable' });
+  assert.doesNotMatch(response.text, /DATA_API_INTERNAL_MARKER|supabase|stack|token|postgres/i);
 });
 
 for (const endpoint of [
@@ -161,11 +234,13 @@ for (const endpoint of [
 ]) {
   test(`Production keeps ${endpoint[0]} ${endpoint[1]} disabled before Auth and database access`, async () => {
     const beforeAuth = authCalls;
+    const beforeDataApi = dataApiCalls;
     const beforeQueries = queryCalls;
     const response = await request(endpoint[0], endpoint[1], 'valid-token');
     assert.equal(response.status, 403);
     assert.deepEqual(response.json, { error:'Public data editing is currently disabled' });
     assert.equal(authCalls, beforeAuth);
+    assert.equal(dataApiCalls, beforeDataApi);
     assert.equal(queryCalls, beforeQueries);
   });
 }

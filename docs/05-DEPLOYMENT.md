@@ -28,7 +28,7 @@
 | `STAGING_DATABASE_PROJECT_REF` | Seed 时必填 | Staging Supabase 项目标识；必须与 `DATABASE_URL` 中的项目一致 |
 | `STAGING_SEED_CONFIRM` | Seed 时必填 | 固定为 `staging`；Production 不配置 |
 | `SUPABASE_URL` | Auth 启用时必填 | 当前环境 Supabase 项目 URL；Staging 与 Production 分开 |
-| `SUPABASE_PUBLISHABLE_KEY` | Auth 启用时必填 | 当前环境的 Publishable Key；不得使用 service-role key |
+| `SUPABASE_PUBLISHABLE_KEY` | Auth/Journal Data API 启用时必填 | 当前环境的 Publishable Key（旧 anon key 兼容）；不得使用 service-role 或 secret key |
 
 `.env.example` 只含占位值。本地真实值放入 `.env`，Render 真实值放入 Environment/Secret。
 
@@ -115,6 +115,8 @@ SUPABASE_PUBLISHABLE_KEY=<Staging publishable key>
 ```
 
 Staging 页面必须显示 `STAGING`，健康检查必须返回 `environment=staging`。
+
+Staging 的 `SUPABASE_URL`、`SUPABASE_PUBLISHABLE_KEY` 和 `DATABASE_URL` 必须指向同一个 Staging Supabase 项目；Production 使用另一套项目配置。Publishable Key 可供浏览器和 Node Data API 客户端使用，但用户身份始终来自经过验证的 Access Token。不得为 Journal 配置 service-role/secret key，也不得让 Journal 回退到管理员 `DATABASE_URL`。
 
 ## GitHub 与自动部署
 

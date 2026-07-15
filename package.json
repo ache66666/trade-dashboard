@@ -10,7 +10,9 @@
     "seed:staging": "node scripts/seed-staging.js",
     "verify:staging-seed": "node scripts/verify-staging-seed.js",
     "seed:staging:clean": "node scripts/clean-staging-seed.js",
-    "migrate:staging:journal": "node scripts/migrate-staging-journal.js"
+    "migrate:staging:journal": "node scripts/migrate-staging-journal.js",
+    "migrate:staging:journal-rls:dry-run": "node scripts/migrate-staging-journal-rls.js --dry-run",
+    "migrate:staging:journal-rls": "node scripts/migrate-staging-journal-rls.js"
   },
   "engines": {
     "node": ">=22.5"

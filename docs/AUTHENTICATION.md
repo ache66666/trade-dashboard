@@ -10,10 +10,16 @@ Browser (ES5 + XMLHttpRequest)
   -> Authorization: Bearer <access_token>
   -> Node API：向 Supabase Auth 验证 Token
   -> req.user = { id, email }
-  -> PostgreSQL / RLS（下一阶段）
+  -> Node Journal Data API client：转发已验证的 Access Token
+  -> Supabase PostgREST：以 authenticated 身份访问
+  -> PostgreSQL / RLS（下一阶段启用策略）
 ```
 
 浏览器取得的 Access Token 不能被 Node 直接信任。受保护接口必须通过统一认证模块验证 Token，并从验证结果取得用户 ID；未来业务 API 不得接受客户端提交的 `user_id`。
+
+Journal 运行时数据访问不再使用 `DATABASE_URL` 对应的管理员 PostgreSQL 连接。Node 在认证成功后向 Supabase Data API 发送 Publishable Key 和同一枚已验证的用户 Access Token。Publishable Key 只标识项目，不代表用户身份；PostgREST 根据用户 JWT 建立 `authenticated` 数据库上下文，后续 RLS 才能以 `auth.uid()` 作为最终安全边界。
+
+禁止在 Journal 用户数据通道使用 service-role/secret key。此类管理密钥会绕过 RLS。原生管理员数据库连接仅保留给现有公共行情运行路径、Migration 和经过控制的后台任务，不得被 Journal 路由调用。
 
 ## 配置
 
@@ -42,6 +48,7 @@ Browser (ES5 + XMLHttpRequest)
 
 - 本阶段没有角色、管理员、个人中心或注册页面。
 - 本阶段不修改 Journal schema，不建立 `user_id`，也不启用 RLS；在 v0.3 完成前不得把“已登录”等同于“Journal 已完成多用户隔离”。
+- 当前前置层只保证 Journal 请求经 Node 验证后以用户 JWT 到达 PostgREST；在 `user_id`、组合唯一约束和 RLS Policy 完成前，仍不得发布为多用户隔离功能。
 - 登录成功不自动授予公共数据维护权限。
 - 下一阶段需为 Journal 增加 `user_id`、`UNIQUE(user_id, note_date)`、RLS Policy，并让所有 Journal SQL 使用经验证的当前用户 ID。
 - Editor 的长期方案应单独增加管理员授权，替换临时环境开关。
