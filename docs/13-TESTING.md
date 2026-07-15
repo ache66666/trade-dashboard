@@ -27,6 +27,8 @@ GitHub Actions 在目标分支 push 时执行：
 
 当前基础测试覆盖：Health payload状态/环境/版本、Commit缺失回退`unknown`、Production拒绝Seed、Staging 项目标识匹配、Seed 幂等，以及 Trading Journal 主线/长度/观察数量/证据重复/状态/日期校验。单元测试不连接 Production 数据库。
 
+Journal Data API 前置层还必须验证：缺失或无效 Token 时零数据访问、认证服务异常的清洗响应、已验证 Token 原样转发、Publishable Key 请求头、service-role/secret key 拒绝、上游错误正文不泄露，以及 Journal 路径不调用原生 PostgreSQL 查询。测试只使用内存 Mock，不访问任何真实 Supabase 项目。
+
 ## 测试层级
 
 ### 静态检查
