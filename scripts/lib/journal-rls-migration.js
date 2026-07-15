@@ -46,6 +46,9 @@ function assertMigrationEnvironment(environment = process.env) {
     projectRefFromSupabaseUrl(environment.PRODUCTION_SUPABASE_URL),
     projectRefFromSupabaseUrl(environment.SUPABASE_PRODUCTION_URL)
   ].filter(Boolean);
+  if (productionRefs.length === 0) {
+    throw new Error('Journal RLS migration refused: a Production project deny-list is required.');
+  }
   if (productionRefs.includes(target.projectRef)) {
     throw new Error('Journal RLS migration refused: database target matches Production.');
   }

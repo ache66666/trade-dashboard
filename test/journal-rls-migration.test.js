@@ -21,6 +21,7 @@ function environment(overrides) {
     DATABASE_URL:'postgresql://postgres.stageproject:password@pooler.example.com/postgres',
     SUPABASE_URL:'https://stageproject.supabase.co',
     JOURNAL_LEGACY_OWNER_USER_ID:OWNER_ID,
+    PRODUCTION_DATABASE_PROJECT_REF:'productionproject',
     ...overrides
   };
 }
@@ -84,6 +85,15 @@ test('Journal RLS runner rejects unsafe environments and invalid owners', () => 
   assert.throws(() => assertMigrationEnvironment(environment({ STAGING_SEED_CONFIRM:'' })), /STAGING_SEED_CONFIRM/);
   assert.throws(() => assertMigrationEnvironment(environment({ STAGING_DATABASE_PROJECT_REF:'other' })), /does not match/);
   assert.throws(() => assertMigrationEnvironment(environment({ JOURNAL_LEGACY_OWNER_USER_ID:'not-a-uuid' })), /valid UUID/);
+  assert.throws(
+    () => assertMigrationEnvironment(environment({
+      PRODUCTION_DATABASE_PROJECT_REF:'',
+      PRODUCTION_DATABASE_URL:'',
+      PRODUCTION_SUPABASE_URL:'',
+      SUPABASE_PRODUCTION_URL:''
+    })),
+    /Production project deny-list is required/
+  );
   assert.throws(
     () => assertMigrationEnvironment(environment({ PRODUCTION_DATABASE_PROJECT_REF:'stageproject' })),
     /matches Production/
