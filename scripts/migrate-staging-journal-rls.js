@@ -15,6 +15,13 @@ async function main() {
       `environment=${result.target.environment}, host=${result.target.host}, ` +
       `project=${result.target.projectRef}, database=${result.target.database}, state=${result.state}`
     );
+    console.log(
+      'Preflight: table=present, owner=present, ' +
+      `userColumn=${result.preflight.userColumnExists ? 'present' : 'absent'}, ` +
+      `totalRows=${result.preflight.totalRows}, nullOwnerRows=${result.preflight.nullOwnerRows}, ` +
+      `dates=${result.preflight.dates.join(',')}` +
+      (result.preflight.securityReady ? ', security=ready' : '')
+    );
   } finally {
     if (client) client.release();
     await closePool();

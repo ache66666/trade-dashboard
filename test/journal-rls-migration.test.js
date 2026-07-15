@@ -112,6 +112,9 @@ test('dry run performs only read-only preflight and never loads or executes migr
   const client = new FakeClient();
   const result = await runMigration({ client, environment:environment(), dryRun:true });
   assert.equal(result.state, 'first-run');
+  assert.deepEqual(result.preflight.dates, ['2026-07-14', '2026-07-15']);
+  assert.equal(result.preflight.totalRows, 2);
+  assert.equal(result.preflight.nullOwnerRows, 2);
   assert.equal(client.calls[0].sql, 'BEGIN READ ONLY');
   assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
   assert.equal(client.calls.some(call => call.sql.indexOf('set_config') >= 0), false);

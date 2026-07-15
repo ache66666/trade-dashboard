@@ -86,7 +86,10 @@ async function inspectMigrationState(client, ownerId) {
     if (!datesMatchExpected(dateValues)) {
       throw new Error('Journal RLS migration refused: legacy rows do not match the approved dates.');
     }
-    return { state:'first-run', totalRows:dateValues.length, nullOwnerRows:dateValues.length };
+    return {
+      state:'first-run', tableExists:true, ownerExists:true, userColumnExists:false,
+      totalRows:dateValues.length, nullOwnerRows:dateValues.length, dates:dateValues
+    };
   }
 
   const ownership = await client.query(
@@ -99,7 +102,10 @@ async function inspectMigrationState(client, ownerId) {
   const counts = ownership.rows[0];
   if (counts.total_rows === 2 && counts.null_owner_rows === 2 &&
       counts.other_owner_rows === 0 && datesMatchExpected(dateValues)) {
-    return { state:'first-run', totalRows:counts.total_rows, nullOwnerRows:counts.null_owner_rows };
+    return {
+      state:'first-run', tableExists:true, ownerExists:true, userColumnExists:true,
+      totalRows:counts.total_rows, nullOwnerRows:counts.null_owner_rows, dates:dateValues
+    };
   }
   if (counts.null_owner_rows !== 0) {
     throw new Error('Journal RLS migration refused: Journal ownership is partially populated.');
@@ -153,7 +159,10 @@ async function inspectMigrationState(client, ownerId) {
       secured.policies_ready === true && secured.anon_table_denied === true &&
       secured.authenticated_table_ready === true && secured.anon_sequence_denied === true &&
       secured.authenticated_sequence_ready === true) {
-    return { state:'migrated', totalRows:counts.total_rows, nullOwnerRows:0 };
+    return {
+      state:'migrated', tableExists:true, ownerExists:true, userColumnExists:true,
+      totalRows:counts.total_rows, nullOwnerRows:0, dates:dateValues, securityReady:true
+    };
   }
   throw new Error('Journal RLS migration refused: existing ownership state is not recognized.');
 }
@@ -178,7 +187,7 @@ async function runMigration(options) {
     const state = await inspectMigrationState(client, safety.ownerId);
     if (dryRun || state.state === 'migrated') {
       await client.query('ROLLBACK');
-      return { dryRun, state:state.state, target:describeDatabaseTarget(environment) };
+      return { dryRun, state:state.state, preflight:state, target:describeDatabaseTarget(environment) };
     }
     await client.query(
       "SELECT set_config('app.journal_legacy_owner_user_id', $1, true)",
@@ -188,7 +197,7 @@ async function runMigration(options) {
     const verification = await inspectMigrationState(client, safety.ownerId);
     if (verification.state !== 'migrated') throw new Error('Journal RLS migration verification failed.');
     await client.query('COMMIT');
-    return { dryRun:false, state:'migrated', target:describeDatabaseTarget(environment) };
+    return { dryRun:false, state:'migrated', preflight:verification, target:describeDatabaseTarget(environment) };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (rollbackError) { /* preserve the original failure */ }
     throw error;
