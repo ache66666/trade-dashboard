@@ -41,6 +41,9 @@ function isEditorWriteRequest(req, url) {
   if (req.method === 'POST' && url.pathname === '/api/events') return true;
   return req.method === 'PUT' && /^\/api\/indicators\/\d+$/.test(url.pathname);
 }
+function isJournalRequest(req, url) {
+  return (req.method === 'GET' || req.method === 'PUT') && /^\/api\/journal\/\d{4}-\d{2}-\d{2}$/.test(url.pathname);
+}
 function body(req) { return new Promise((resolve,reject)=>{ let s=''; req.on('data',c=>{s+=c;if(s.length>1e6)reject(new Error('请求过大'));}); req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch(e){reject(e)}}); }); }
 function validateIndicator(x) {
   const required=['symbol','name','category','value','previous_value','source','as_of','frequency','change_type'];
@@ -160,7 +163,7 @@ const server = http.createServer(async (req,res)=>{
       if (!user) return;
       return json(res,200,user);
     }
-    if (isEditorWriteRequest(req, url)) {
+    if (isEditorWriteRequest(req, url) || isJournalRequest(req, url)) {
       const user = await requireAuth(req, res, { config, sendJson:json, logger });
       if (!user) return;
     }
@@ -292,4 +295,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, start, shutdown, isEditorWriteRequest };
+module.exports = { server, start, shutdown, isEditorWriteRequest, isJournalRequest };

@@ -143,6 +143,16 @@ test('public Dashboard remains available without login', async () => {
   assert.equal(response.json.events.length, 1);
 });
 
+test('Journal read and write require Auth before database access', async () => {
+  for (const method of ['GET', 'PUT']) {
+    const beforeQueries = queryCalls;
+    const response = await request(method, '/api/journal/2026-07-15');
+    assert.equal(response.status, 401);
+    assert.deepEqual(response.json, { error:'Authentication required' });
+    assert.equal(queryCalls, beforeQueries);
+  }
+});
+
 for (const endpoint of [
   ['POST', '/api/refresh'],
   ['POST', '/api/indicators'],

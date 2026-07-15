@@ -472,7 +472,7 @@
     };
     xhr.onerror = function () { done(new Error('网络错误')); };
     xhr.ontimeout = function () { done(new Error('请求超时')); };
-    sendApiXhr(xhr, payload ? JSON.stringify(payload) : null, false, done);
+    sendApiXhr(xhr, payload ? JSON.stringify(payload) : null, true, done);
   }
 
   function loadJournal() {

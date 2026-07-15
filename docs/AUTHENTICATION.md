@@ -28,7 +28,7 @@ Browser (ES5 + XMLHttpRequest)
 
 `GET /api/auth/me` 要求 `Authorization: Bearer <access_token>`。成功只返回 `id` 和 `email`；Token 缺失、格式错误、无效或过期时返回 `401`。认证服务暂不可用时返回经过清洗的 `503`。
 
-公共市场 GET 接口保持匿名可读。Production 的 Editor 写接口仍优先返回 `403`。Staging 即使显式打开临时 Editor 开关，也必须先通过用户认证；这不代表登录用户已经获得长期管理员权限。
+公共市场 GET 接口保持匿名可读。Journal GET/PUT 因包含私人判断而要求登录，但本阶段尚未实现用户行级隔离。Production 的 Editor 写接口仍优先返回 `403`。Staging 即使显式打开临时 Editor 开关，也必须先通过用户认证；这不代表登录用户已经获得长期管理员权限。
 
 ## 浏览器 Session
 
@@ -41,7 +41,7 @@ Browser (ES5 + XMLHttpRequest)
 ## 当前限制与下一阶段
 
 - 本阶段没有角色、管理员、个人中心或注册页面。
-- 本阶段不修改 Journal schema，不建立 `user_id`，也不启用 RLS。
+- 本阶段不修改 Journal schema，不建立 `user_id`，也不启用 RLS；在 v0.3 完成前不得把“已登录”等同于“Journal 已完成多用户隔离”。
 - 登录成功不自动授予公共数据维护权限。
 - 下一阶段需为 Journal 增加 `user_id`、`UNIQUE(user_id, note_date)`、RLS Policy，并让所有 Journal SQL 使用经验证的当前用户 ID。
 - Editor 的长期方案应单独增加管理员授权，替换临时环境开关。
