@@ -77,6 +77,22 @@
 | `is_manual` | 手工维护 | boolean | 默认 `true` |
 | `updated_at` | 记录更新时间 | timestamptz | 默认当前时间 |
 
+## `daily_market_notes` 表
+
+| 字段 | 中文含义 | 类型 | 约束/口径 |
+| --- | --- | --- | --- |
+| `id` | 日志 ID | bigint | 主键，identity |
+| `note_date` | 日志日期 | date | 必填且唯一，一日一条 |
+| `thesis` | 交易主线 | text | 固定选项之一 |
+| `summary` | 一句话判断 | text | 必填，1–200字 |
+| `supporting_evidence` | 支持证据 | jsonb array | 每项包含现有指标 `symbol` 与备注 |
+| `opposing_evidence` | 反对证据 | jsonb array | 每项包含现有指标 `symbol` 与备注 |
+| `watchlist` | 明日观察 | jsonb array | 最多3项；标题、备注、验证状态 |
+| `created_at` | 创建时间 | timestamptz | 默认当前时间 |
+| `updated_at` | 更新时间 | timestamptz | 每次保存更新 |
+
+观察状态只允许：`未验证`、`已验证`、`与预期相反`。证据只引用指标代码，不复制或修改行情数据。
+
 ## 新指标登记模板
 
 | 名称 | 中文 | 分类 | 来源 | 更新方式 | 更新时间/频率 | 备注 |
