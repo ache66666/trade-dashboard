@@ -34,6 +34,12 @@ function compatJson(res, status, body) {
 function apiRow(row) {
   return row ? { ...row, id: Number(row.id) } : row;
 }
+function isEditorWriteRequest(req, url) {
+  if (req.method === 'POST' && url.pathname === '/api/refresh') return true;
+  if (req.method === 'POST' && url.pathname === '/api/indicators') return true;
+  if (req.method === 'POST' && url.pathname === '/api/events') return true;
+  return req.method === 'PUT' && /^\/api\/indicators\/\d+$/.test(url.pathname);
+}
 function body(req) { return new Promise((resolve,reject)=>{ let s=''; req.on('data',c=>{s+=c;if(s.length>1e6)reject(new Error('请求过大'));}); req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch(e){reject(e)}}); }); }
 function validateIndicator(x) {
   const required=['symbol','name','category','value','previous_value','source','as_of','frequency','change_type'];
@@ -145,6 +151,9 @@ async function refreshAll() {
 const server = http.createServer(async (req,res)=>{
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
+    if (isEditorWriteRequest(req, url) && !config.editorWriteEnabled) {
+      return json(res,403,{error:'Public data editing is currently disabled'});
+    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return handleHealth({ query, sendJson:json, response:res, config });
     }
@@ -232,14 +241,20 @@ const server = http.createServer(async (req,res)=>{
         .replace('__APP_ENV_JSON__', JSON.stringify(config.appEnv))
         .replace('__DEBUG_PANEL_DEFAULT__', config.debugPanelDefault ? 'true' : 'false')
         .replace('__APP_COMMIT_JSON__', JSON.stringify(config.commit))
-        .replace('__APP_VERSION_JSON__', JSON.stringify(config.version));
+        .replace('__APP_VERSION_JSON__', JSON.stringify(config.version))
+        .replace('__EDITOR_WRITE_ENABLED__', config.editorWriteEnabled ? 'true' : 'false')
+        .replace(/__EDITOR_WRITE_HIDDEN__/g, config.editorWriteEnabled ? '' : 'hidden');
       const buffer = Buffer.from(html, 'utf8');
       res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
       return res.end(buffer);
     }
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
-  } catch(e) { json(res,e.code==='23505'?409:500,{error:e.code==='23505'?'代码已存在':e.message}); }
+  } catch(e) {
+    if (e.code === '23505') return json(res,409,{error:'代码已存在'});
+    logger.error(`API request failed: ${req.method} ${url.pathname}: ${e.message}`);
+    return json(res,500,{error:'Internal server error'});
+  }
 });
 
 async function start() {
@@ -254,10 +269,14 @@ async function shutdown() {
   });
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-start().catch(async error => {
-  logger.error(`Market Workbench failed to start: ${error.message}`);
-  await closePool();
-  process.exit(1);
-});
+if (require.main === module) {
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  start().catch(async error => {
+    logger.error(`Market Workbench failed to start: ${error.message}`);
+    await closePool();
+    process.exit(1);
+  });
+}
+
+module.exports = { server, start, shutdown, isEditorWriteRequest };
