@@ -188,6 +188,7 @@ test('authenticated Journal read uses Data API with the verified token and not p
   assert.equal(queryCalls, beforeQueries);
   assert.equal(dataApiCalls, beforeDataApi + 1);
   assert.equal(lastDataApiRequest.options.headers.Authorization, 'Bearer valid-token');
+  assert.equal(new URL(lastDataApiRequest.url).searchParams.get('user_id'), 'eq.user-123');
 });
 
 test('authenticated Journal write uses only Data API and ignores client user_id', async () => {
@@ -206,7 +207,8 @@ test('authenticated Journal write uses only Data API and ignores client user_id'
   assert.equal(queryCalls, beforeQueries);
   assert.equal(dataApiCalls, beforeDataApi + 1);
   assert.equal(lastDataApiRequest.options.headers.Authorization, 'Bearer valid-token');
-  assert.equal(Object.hasOwn(JSON.parse(lastDataApiRequest.options.body), 'user_id'), false);
+  assert.equal(JSON.parse(lastDataApiRequest.options.body).user_id, 'user-123');
+  assert.equal(new URL(lastDataApiRequest.url).searchParams.get('on_conflict'), 'user_id,note_date');
 });
 
 test('Journal Auth provider failures return 503 without Data API access', async () => {

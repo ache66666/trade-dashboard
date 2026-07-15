@@ -199,7 +199,7 @@ const server = http.createServer(async (req,res)=>{
     const journalMatch=url.pathname.match(/^\/api\/journal\/(\d{4}-\d{2}-\d{2})$/);
     if(journalMatch && req.method==='GET') {
       if(!validDate(journalMatch[1])) return json(res,400,{error:'日志日期无效'});
-      const rows=await journalData.getDailyNote(journalMatch[1],req.auth.accessToken);
+      const rows=await journalData.getDailyNote(journalMatch[1],req.user.id,req.auth.accessToken);
       return json(res,200,{date:journalMatch[1],note:apiRow(rows[0]||null)});
     }
     if(journalMatch && req.method==='PUT') {
@@ -214,7 +214,7 @@ const server = http.createServer(async (req,res)=>{
         const missing=symbols.filter(symbol=>!knownSymbols.has(symbol));
         if(missing.length)return json(res,400,{error:`证据指标不存在：${missing.join(', ')}`});
       }
-      const rows=await journalData.upsertDailyNote(journalMatch[1],x,req.auth.accessToken);
+      const rows=await journalData.upsertDailyNote(journalMatch[1],x,req.user.id,req.auth.accessToken);
       return json(res,200,{date:journalMatch[1],note:apiRow(rows[0])});
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {

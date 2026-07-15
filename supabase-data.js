@@ -76,10 +76,10 @@ function createSupabaseDataClient(options) {
     }
   }
 
-  function getDailyNote(noteDate, accessToken) {
+  function getDailyNote(noteDate, userId, accessToken) {
     return request('daily_market_notes', {
       accessToken,
-      query:{ select:'*', note_date:`eq.${noteDate}`, limit:'1' }
+      query:{ select:'*', user_id:`eq.${userId}`, note_date:`eq.${noteDate}`, limit:'1' }
     });
   }
 
@@ -91,13 +91,14 @@ function createSupabaseDataClient(options) {
     });
   }
 
-  function upsertDailyNote(noteDate, note, accessToken) {
+  function upsertDailyNote(noteDate, note, userId, accessToken) {
     return request('daily_market_notes', {
       method:'POST',
       accessToken,
-      query:{ on_conflict:'note_date', select:'*' },
+      query:{ on_conflict:'user_id,note_date', select:'*' },
       prefer:'resolution=merge-duplicates,return=representation',
       body:{
+        user_id:userId,
         note_date:noteDate,
         thesis:note.thesis,
         summary:note.summary,
