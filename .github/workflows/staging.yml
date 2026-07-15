@@ -58,7 +58,17 @@ jobs:
     steps:
       - name: Trigger Render Staging deploy
         if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
-        run: curl --fail --show-error --silent --request POST "$RENDER_DEPLOY_HOOK_URL"
+        run: |
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --request POST \
+            --output /dev/null \
+            --write-out "Render Staging deploy hook accepted: HTTP %{http_code}\n" \
+            "$RENDER_DEPLOY_HOOK_URL"
 
       - name: Explain skipped Staging deploy
         if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
