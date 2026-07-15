@@ -1,24 +1,24 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260712-layout2"></head>
-<body><script>window.__APP_CONFIG__={environment:'__APP_ENV__',debugPanelDefault:__DEBUG_PANEL_DEFAULT__};</script>
+<body><script>window.__APP_CONFIG__={environment:'__APP_ENV__',debugPanelDefault:__DEBUG_PANEL_DEFAULT__,editorWriteEnabled:__EDITOR_WRITE_ENABLED__};</script>
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">M</span><div><b>MARKET PULSE</b><small>交易市场工作台</small></div></div>
     <nav>
       <button class="nav active" data-page="overview"><span>⌁</span>市场总览</button>
       <button class="nav" data-page="details"><span>▦</span>详细数据</button>
-      <button class="nav" data-page="editor"><span>✎</span>数据维护</button>
+      <button class="nav" data-page="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__><span>✎</span>数据维护</button>
     </nav>
     <div class="sidebar-note"><span class="live-dot"></span><div><b>云端数据库已连接</b><small>手工修改会持久保存</small></div></div>
   </aside>
   <main>
-    <header><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1 id="pageTitle">市场总览</h1><p id="pageDesc">用最少的数据，看清今天的市场方向。</p></div><div class="header-right"><span class="environment-badge" id="environmentBadge" hidden>STAGING</span><div class="datebox"><small>数据基准</small><b id="latestDate">—</b></div><button class="refresh" id="refreshBtn">↻ 刷新</button></div></header>
+    <header><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1 id="pageTitle">市场总览</h1><p id="pageDesc">用最少的数据，看清今天的市场方向。</p></div><div class="header-right"><span class="environment-badge" id="environmentBadge" hidden>STAGING</span><div class="datebox"><small>数据基准</small><b id="latestDate">—</b></div><button class="refresh" id="refreshBtn" data-editor-write-control __EDITOR_WRITE_HIDDEN__>↻ 刷新</button></div></header>
 
     <section class="page active" id="overview">
       <div class="ticker" id="ticker"></div>
       <div class="section-heading"><div><p class="eyebrow">MARKET OVERVIEW</p><h2>核心市场</h2></div><span>红涨绿跌 · 仅表示数值方向</span></div>
       <div class="overview-grid" id="overviewGrid"></div>
-      <div class="calendar-panel"><div class="panel-title"><div><p class="eyebrow">MACRO CALENDAR</p><h2>宏观日历</h2></div><button class="link-btn" data-go="editor">＋ 添加事件</button></div><div id="eventList"></div></div>
+      <div class="calendar-panel"><div class="panel-title"><div><p class="eyebrow">MACRO CALENDAR</p><h2>宏观日历</h2></div><button class="link-btn" data-go="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__>＋ 添加事件</button></div><div id="eventList"></div></div>
     </section>
 
     <section class="page" id="details">
@@ -26,7 +26,7 @@
       <div id="detailsRoot"></div>
     </section>
 
-    <section class="page" id="editor">
+    <section class="page" id="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__>
       <div class="editor-intro"><div><p class="eyebrow">MANUAL DATA</p><h2>手工数据维护</h2><p>没有稳定公开接口的指标统一在这里维护。可根据 Wind 截图录入当前值、前值、日期和来源。</p></div><button class="primary" id="newBtn">＋ 新增手工指标</button></div>
       <div class="edit-layout"><div class="edit-table-wrap"><table><thead><tr><th>指标</th><th>品类</th><th>当前值</th><th>数据日期</th><th>来源</th><th></th></tr></thead><tbody id="editTable"></tbody></table></div><div class="event-form-card"><p class="eyebrow">CALENDAR INPUT</p><h3>添加宏观事件</h3><form id="eventForm"><label>时间<input type="datetime-local" name="event_time" required></label><label>地区<input name="region" placeholder="中国 / 美国" required></label><label>事件名称<input name="name" placeholder="例如 CPI 同比" required></label><div class="form-row"><label>重要性<select name="importance"><option value="3">★★★</option><option value="4">★★★★</option><option value="5">★★★★★</option></select></label><label>来源<input name="source" value="手工录入" required></label></div><div class="form-row"><label>前值<input name="previous"></label><label>预期<input name="forecast"></label></div><button class="primary full" type="submit">保存事件</button></form></div></div>
     </section>

@@ -14,6 +14,7 @@
     { name: 'Options', label: '期权与波动率', detail: '波动率', symbols: ['VIX', 'MOVE'] }
   ];
   var publicConfig = window.__APP_CONFIG__ || {};
+  var editorWriteEnabled = publicConfig.editorWriteEnabled === true;
   var debugEnabled = Boolean(publicConfig.debugPanelDefault) || window.location.search.indexOf('debug=1') >= 0;
   var stageBox;
 
@@ -158,6 +159,10 @@
   }
 
   function showPage(page) {
+    if (page === 'editor' && !editorWriteEnabled) {
+      showError('数据维护功能暂未开放');
+      return;
+    }
     var navs = all('.nav');
     var pages = all('.page');
     var i;
@@ -225,6 +230,10 @@
   }
 
   function openIndicatorDialog(item) {
+    if (!editorWriteEnabled) {
+      showError('数据维护功能暂未开放');
+      return;
+    }
     var dialog = byId('editDialog');
     var form = byId('indicatorForm');
     var key;
@@ -250,6 +259,10 @@
   }
 
   function request(method, url, payload, done, failed) {
+    if (!editorWriteEnabled && method !== 'GET') {
+      failed(new Error('数据维护功能暂未开放'));
+      return;
+    }
     var xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
     xhr.timeout = 10000;
@@ -261,6 +274,10 @@
   }
 
   function refreshMarketData() {
+    if (!editorWriteEnabled) {
+      showError('数据维护功能暂未开放');
+      return;
+    }
     var button = byId('refreshBtn');
     var xhr = new XMLHttpRequest();
     button.disabled = true;
@@ -320,6 +337,17 @@
     runStage.last = 'listeners';
   }
 
+  function applyEditorWriteState() {
+    var controls;
+    var i;
+    if (editorWriteEnabled) return;
+    controls = all('[data-editor-write-control]');
+    for (i = 0; i < controls.length; i += 1) {
+      controls[i].hidden = true;
+      controls[i].disabled = true;
+    }
+  }
+
   function formPayload(form) {
     var payload = {};
     var i;
@@ -374,6 +402,7 @@
   }
 
   createStageBox();
+  applyEditorWriteState();
   if (publicConfig.environment === 'staging') byId('environmentBadge').hidden = false;
   loadDashboard();
 }());
