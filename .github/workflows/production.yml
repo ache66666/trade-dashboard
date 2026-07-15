@@ -1,0 +1,76 @@
+name: Production CI and Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  check-build:
+    name: Check and Build Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout main commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Audit dependencies (non-blocking)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Check tracked JavaScript syntax
+        run: git ls-files -z '*.js' | xargs -0 -n1 node --check
+
+      - name: Run tests when configured
+        run: npm test --if-present
+
+      - name: Run lint when configured
+        run: npm run lint --if-present
+
+      - name: Build when configured
+        run: npm run build --if-present
+
+  deploy:
+    name: Deploy Production
+    needs: check-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_PRODUCTION_DEPLOY_HOOK_URL }}
+
+    steps:
+      - name: Require Production deploy hook
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
+        run: |
+          echo "RENDER_PRODUCTION_DEPLOY_HOOK_URL is required; Production deployment is blocked."
+          exit 1
+
+      - name: Trigger Render Production deploy
+        run: |
+          curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --request POST \
+            --output /dev/null \
+            --write-out "Render Production deploy hook accepted: HTTP %{http_code}\n" \
+            "$RENDER_DEPLOY_HOOK_URL"
