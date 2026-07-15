@@ -16,6 +16,8 @@
   ];
   var publicConfig = window.__APP_CONFIG__ || {};
   var editorWriteEnabled = publicConfig.editorWriteEnabled === true;
+  var authClient = window.marketAuth || null;
+  var authVerifying = false;
   var debugEnabled = Boolean(publicConfig.debugPanelDefault) || window.location.search.indexOf('debug=1') >= 0;
   var stageBox;
 
@@ -53,6 +55,81 @@
     toast.textContent = message;
     toast.className = 'toast show';
     window.setTimeout(function () { toast.className = 'toast'; }, 4000);
+  }
+
+  function sendApiXhr(xhr, payload, requireLogin, failed) {
+    if (!authClient) {
+      if (requireLogin) { failed(new Error('请先登录')); return; }
+      xhr.send(payload);
+      return;
+    }
+    if (requireLogin) {
+      authClient.sendAuthenticated(xhr, payload, function (error) { failed(error); });
+      return;
+    }
+    authClient.send(xhr, payload);
+  }
+
+  function renderAuthState(state) {
+    var form = byId('authLoginForm');
+    var sessionPanel = byId('authSession');
+    var status = byId('authStatus');
+    var loginButton = byId('authLoginBtn');
+    if (!form || !sessionPanel || !status) return;
+    status.className = state.error ? 'auth-error' : '';
+    if (!state.configured) {
+      form.hidden = false;
+      sessionPanel.hidden = true;
+      loginButton.disabled = true;
+      status.textContent = '身份服务尚未配置';
+      return;
+    }
+    loginButton.disabled = Boolean(state.loading);
+    if (state.authenticated) {
+      form.hidden = true;
+      sessionPanel.hidden = false;
+      byId('authUserEmail').textContent = state.user && state.user.email ? state.user.email : '正在验证…';
+      status.textContent = state.error || (state.user ? '身份已验证' : '正在验证身份…');
+    } else {
+      form.hidden = false;
+      sessionPanel.hidden = true;
+      status.textContent = state.error || (state.loading ? '登录中…' : '未登录');
+    }
+  }
+
+  function verifyCurrentUser() {
+    if (!authClient || !authClient.getSession() || authVerifying) return;
+    authVerifying = true;
+    authClient.currentUser(function (error, user) {
+      authVerifying = false;
+      if (error) {
+        authClient.signOut(function () {});
+        renderAuthState({ configured:true, authenticated:false, error:error.message });
+        return;
+      }
+      renderAuthState({ configured:true, authenticated:true, user:user });
+    });
+  }
+
+  function initAuthentication() {
+    var form = byId('authLoginForm');
+    if (!authClient || !form) {
+      renderAuthState({ configured:false, authenticated:false });
+      return;
+    }
+    authClient.onChange(function (state) {
+      renderAuthState(state);
+      if (state.authenticated && !authVerifying) verifyCurrentUser();
+    });
+    form.onsubmit = function (event) {
+      event.preventDefault();
+      authClient.signIn(byId('authEmail').value, byId('authPassword').value, function (error) {
+        if (error) { renderAuthState({ configured:true, authenticated:false, error:error.message }); return; }
+        byId('authPassword').value = '';
+      });
+    };
+    byId('authLogoutBtn').onclick = function () { authClient.signOut(function () {}); };
+    authClient.init();
   }
 
   function runStage(name, work) {
@@ -274,7 +351,7 @@
     xhr.onload = function () { if (xhr.status >= 200 && xhr.status < 300) done(xhr.responseText); else failed(new Error('HTTP ' + xhr.status)); };
     xhr.onerror = function () { failed(new Error('网络错误')); };
     xhr.ontimeout = function () { failed(new Error('请求超时')); };
-    xhr.send(payload === null ? null : JSON.stringify(payload));
+    sendApiXhr(xhr, payload === null ? null : JSON.stringify(payload), method !== 'GET', failed);
   }
 
   function localDate() {
@@ -395,7 +472,7 @@
     };
     xhr.onerror = function () { done(new Error('网络错误')); };
     xhr.ontimeout = function () { done(new Error('请求超时')); };
-    xhr.send(payload ? JSON.stringify(payload) : null);
+    sendApiXhr(xhr, payload ? JSON.stringify(payload) : null, true, done);
   }
 
   function loadJournal() {
@@ -446,7 +523,11 @@
     };
     xhr.onerror = function () { button.disabled = false; button.textContent = '↻ 刷新'; report('刷新', 'failed', new Error('网络错误'), 'api/refresh'); };
     xhr.ontimeout = function () { button.disabled = false; button.textContent = '↻ 刷新'; report('刷新', 'failed', new Error('请求超时'), 'api/refresh'); };
-    xhr.send(null);
+    sendApiXhr(xhr, null, true, function (error) {
+      button.disabled = false;
+      button.textContent = '↻ 刷新';
+      report('刷新', 'failed', error, 'api/refresh');
+    });
   }
 
   function attachListeners() {
@@ -557,7 +638,7 @@
       xhr.onerror = function () { report('XHR', 'failed', new Error('网络错误'), 'onerror'); };
       xhr.ontimeout = function () { report('XHR', 'failed', new Error('请求超时'), 'ontimeout'); };
       xhr.onabort = function () { report('XHR', 'failed', new Error('请求中止'), 'onabort'); };
-      xhr.send(null);
+      sendApiXhr(xhr, null, false, function (error) { report('XHR', 'failed', error, 'authorization'); });
     } catch (error) {
       report('XHR create/send', 'failed', error, '—');
     }
@@ -565,6 +646,7 @@
 
   createStageBox();
   applyEditorWriteState();
+  initAuthentication();
   if (publicConfig.environment === 'staging') byId('environmentBadge').hidden = false;
   report('Runtime', 'ready', null, (publicConfig.environment || 'unknown') + ' commit=' + (publicConfig.commit || 'unknown') + ' version=' + (publicConfig.version || 'unknown'));
   loadDashboard();

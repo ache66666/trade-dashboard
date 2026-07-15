@@ -27,6 +27,8 @@
 | `DEPLOYED_AT` | 否 | 只有发布系统能提供可靠 ISO 时间时设置 |
 | `STAGING_DATABASE_PROJECT_REF` | Seed 时必填 | Staging Supabase 项目标识；必须与 `DATABASE_URL` 中的项目一致 |
 | `STAGING_SEED_CONFIRM` | Seed 时必填 | 固定为 `staging`；Production 不配置 |
+| `SUPABASE_URL` | Auth 启用时必填 | 当前环境 Supabase 项目 URL；Staging 与 Production 分开 |
+| `SUPABASE_PUBLISHABLE_KEY` | Auth 启用时必填 | 当前环境的 Publishable Key；不得使用 service-role key |
 
 `.env.example` 只含占位值。本地真实值放入 `.env`，Render 真实值放入 Environment/Secret。
 
@@ -82,6 +84,8 @@ NODE_ENV=production
 DATABASE_URL=<Production Session pooler URL>
 DEBUG_PANEL_DEFAULT=false
 LOG_LEVEL=info
+SUPABASE_URL=<Production Supabase project URL>
+SUPABASE_PUBLISHABLE_KEY=<Production publishable key>
 ```
 
 Production 页面不得显示 `STAGING`。`/api/health` 必须返回 `environment=production`。
@@ -106,6 +110,8 @@ DATABASE_URL=<Staging Session pooler URL>
 DEBUG_PANEL_DEFAULT=false
 LOG_LEVEL=debug
 DATABASE_POOL_MAX=5
+SUPABASE_URL=<Staging Supabase project URL>
+SUPABASE_PUBLISHABLE_KEY=<Staging publishable key>
 ```
 
 Staging 页面必须显示 `STAGING`，健康检查必须返回 `environment=staging`。

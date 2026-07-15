@@ -51,6 +51,7 @@ market-workbench/
 - [11 数据库设计](docs/11-DATABASE.md)
 - [12 数据源目录](docs/12-DATA_SOURCE.md)
 - [13 测试与上线 Checklist](docs/13-TESTING.md)
+- [身份认证基础设施](docs/AUTHENTICATION.md)
 - [Task 管理与模板](docs/tasks/TEMPLATE.md)
 - [变更记录](docs/CHANGELOG.md)
 - [架构决策记录](docs/decisions/)
