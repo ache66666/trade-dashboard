@@ -50,7 +50,7 @@ function createSupabaseDataClient(options) {
       throw unavailableError();
     }
     Object.entries(requestOptions.query || {}).forEach(([name, value]) => url.searchParams.set(name, value));
-    Object.assign(headers, requestOptions.headers || {});
+    if (requestOptions.prefer) headers.Prefer = requestOptions.prefer;
     if (requestOptions.body !== undefined) headers['Content-Type'] = 'application/json';
 
     controller = new AbortController();
@@ -96,7 +96,7 @@ function createSupabaseDataClient(options) {
       method:'POST',
       accessToken,
       query:{ on_conflict:'note_date', select:'*' },
-      headers:{ Prefer:'resolution=merge-duplicates,return=representation' },
+      prefer:'resolution=merge-duplicates,return=representation',
       body:{
         note_date:noteDate,
         thesis:note.thesis,

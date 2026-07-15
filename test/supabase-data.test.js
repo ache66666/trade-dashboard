@@ -36,10 +36,12 @@ test('Data API forwards the verified user token and publishable key', async () =
 
 test('Journal upsert never forwards a client-supplied user_id', async () => {
   let sentBody;
+  let sentHeaders;
   const client = createSupabaseDataClient({
     config,
     fetchImpl:async function (url, options) {
       sentBody = JSON.parse(options.body);
+      sentHeaders = options.headers;
       return response(200, [sentBody]);
     }
   });
@@ -52,6 +54,9 @@ test('Journal upsert never forwards a client-supplied user_id', async () => {
     watchlist:[]
   }, 'verified-user-token');
   assert.equal(Object.hasOwn(sentBody, 'user_id'), false);
+  assert.equal(sentHeaders.Authorization, 'Bearer verified-user-token');
+  assert.equal(sentHeaders.apikey, 'test-publishable-key');
+  assert.equal(sentHeaders.Prefer, 'resolution=merge-duplicates,return=representation');
 });
 
 test('Data API failures are sanitized and do not expose upstream content', async () => {
