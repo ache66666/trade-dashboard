@@ -1,0 +1,40 @@
+.auth-widget {
+  margin-top: auto;
+  border-top: 1px solid #31423e;
+  padding: 15px 10px 4px;
+}
+.auth-widget form { display: grid; gap: 7px; }
+.auth-widget form > b,
+.auth-widget #authSession > b {
+  color: #eef2ed;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.auth-widget label { color: #93a09c; margin: 0; }
+.auth-widget input {
+  width: 100%;
+  padding: 7px;
+  border-color: #40514c;
+  background: #20312d;
+  color: #eef2ed;
+  font-size: 11px;
+}
+.auth-button,
+.auth-signout {
+  border: 1px solid #50645e;
+  border-radius: 5px;
+  background: #273a35;
+  color: #eef2ed;
+  padding: 7px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.auth-signout { margin-top: 8px; width: 100%; }
+.auth-widget #authSession small { display: block; color: #93a09c; margin-bottom: 4px; }
+.auth-widget #authStatus { min-height: 14px; margin: 7px 0 0; color: #93a09c; font-size: 10px; }
+.auth-widget #authStatus.auth-error { color: #e4a398; }
+.auth-widget + .sidebar-note { margin-top: 10px; }
+@media (max-width: 760px) {
+  .auth-widget { margin: 12px 0 0; max-width: 300px; }
+  .auth-widget + .sidebar-note { display: none; }
+}

@@ -25,6 +25,8 @@ const appEnv = appEnvironment();
 const databaseUrl = process.env.DATABASE_URL;
 const runtime = getRuntimeInfo(process.env);
 const editorWriteEnabled = appEnv === 'staging' && booleanValue('EDITOR_WRITE_ENABLED', false);
+const supabaseUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+const supabasePublishableKey = String(process.env.SUPABASE_PUBLISHABLE_KEY || '').trim();
 
 if (!databaseUrl) throw new Error('缺少 DATABASE_URL，无法连接 PostgreSQL');
 
@@ -34,6 +36,9 @@ module.exports = Object.freeze({
   databaseUrl,
   debugPanelDefault: booleanValue('DEBUG_PANEL_DEFAULT', false),
   editorWriteEnabled,
+  authConfigured:Boolean(supabaseUrl && supabasePublishableKey),
+  supabaseUrl,
+  supabasePublishableKey,
   logLevel: String(process.env.LOG_LEVEL || 'info').trim().toLowerCase(),
   port: positiveInteger('PORT', 4173),
   databasePoolMax: positiveInteger('DATABASE_POOL_MAX', 10),

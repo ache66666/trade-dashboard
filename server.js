@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config');
 const logger = require('./logger');
+const { requireAuth } = require('./auth');
 const { handleHealth } = require('./health');
 const { validateJournal, validDate } = require('./journal');
 const { getPool, query, closePool } = require('./database');
@@ -154,6 +155,15 @@ const server = http.createServer(async (req,res)=>{
     if (isEditorWriteRequest(req, url) && !config.editorWriteEnabled) {
       return json(res,403,{error:'Public data editing is currently disabled'});
     }
+    if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+      const user = await requireAuth(req, res, { config, sendJson:json, logger });
+      if (!user) return;
+      return json(res,200,user);
+    }
+    if (isEditorWriteRequest(req, url)) {
+      const user = await requireAuth(req, res, { config, sendJson:json, logger });
+      if (!user) return;
+    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return handleHealth({ query, sendJson:json, response:res, config });
     }
@@ -243,6 +253,9 @@ const server = http.createServer(async (req,res)=>{
         .replace('__APP_COMMIT_JSON__', JSON.stringify(config.commit))
         .replace('__APP_VERSION_JSON__', JSON.stringify(config.version))
         .replace('__EDITOR_WRITE_ENABLED__', config.editorWriteEnabled ? 'true' : 'false')
+        .replace('__AUTH_CONFIGURED__', config.authConfigured ? 'true' : 'false')
+        .replace('__SUPABASE_URL_JSON__', JSON.stringify(config.supabaseUrl))
+        .replace('__SUPABASE_PUBLISHABLE_KEY_JSON__', JSON.stringify(config.supabasePublishableKey))
         .replace(/__EDITOR_WRITE_HIDDEN__/g, config.editorWriteEnabled ? '' : 'hidden');
       const buffer = Buffer.from(html, 'utf8');
       res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
