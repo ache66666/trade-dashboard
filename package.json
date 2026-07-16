@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
+    "check:engineering": "node scripts/check-engineering.js",
+    "verify:staging": "node scripts/acceptance/acceptance-staging.js",
+    "feature": "node scripts/create-feature.js",
     "seed:staging:dry-run": "node scripts/seed-staging.js --dry-run",
     "seed:staging": "node scripts/seed-staging.js",
     "verify:staging-seed": "node scripts/verify-staging-seed.js",
