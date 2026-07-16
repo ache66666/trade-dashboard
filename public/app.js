@@ -154,12 +154,14 @@
 
   function simpleValue(item) {
     if (!item || item.source === '待手工录入') return '待录入';
+    if (item.value === null || item.value === undefined || item.value === '' || !isFinite(Number(item.value))) return '暂无数据';
     return text(item.value) + (item.value_unit ? (item.value_unit === '%' ? '%' : ' ' + item.value_unit) : '');
   }
 
   function simpleChange(item) {
     var change;
     if (!item || item.source === '待手工录入') return '—';
+    if (item.value === null || item.value === undefined || item.value === '' || item.previous_value === null || item.previous_value === undefined || item.previous_value === '' || !isFinite(Number(item.value)) || !isFinite(Number(item.previous_value))) return '暂无数据';
     if (item.change_type === 'bp') change = (Number(item.value) - Number(item.previous_value)) * (item.value_unit === 'bp' ? 1 : 100);
     else change = Number(item.previous_value) ? (Number(item.value) / Number(item.previous_value) - 1) * 100 : 0;
     if (!isFinite(change)) return '暂无数据';
@@ -174,6 +176,7 @@
   function marketStatusClass(item) {
     var change;
     if (!item || item.source === '待手工录入') return 'status-pending';
+    if (item.value === null || item.value === undefined || item.value === '' || item.previous_value === null || item.previous_value === undefined || item.previous_value === '' || !isFinite(Number(item.value)) || !isFinite(Number(item.previous_value))) return 'status-pending';
     change = Number(item.value) - Number(item.previous_value);
     return change > 0 ? 'status-up' : change < 0 ? 'status-down' : 'status-flat';
   }

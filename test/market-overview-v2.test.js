@@ -4,11 +4,35 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'public/overview.css'), 'utf8');
+
+function extractFunction(source, name) {
+  const start = source.indexOf('function ' + name + '(');
+  assert.notEqual(start, -1, 'missing function ' + name);
+  const bodyStart = source.indexOf('{', start);
+  let depth = 0;
+  let index;
+  for (index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error('unterminated function ' + name);
+}
+
+function loadOverviewModel() {
+  const context = {};
+  const names = ['text', 'escapeHtml', 'simpleValue', 'simpleChange', 'marketStatusClass', 'overviewRow'];
+  vm.runInNewContext(names.map((name) => extractFunction(app, name)).join('\n'), context);
+  return context;
+}
 
 test('Market Overview 2.0 exposes the intended information hierarchy', () => {
   assert.match(html, /TODAY'S MARKET/);
@@ -39,6 +63,29 @@ test('Overview uses scoped up, down and pending states without changing global A
   assert.match(app, /\/api\/dashboard-compat\?t=/);
 });
 
+test('Market state mapping executes correctly for up, down, flat, pending and invalid values', () => {
+  const model = loadOverviewModel();
+  assert.equal(model.marketStatusClass({ value: 2, previous_value: 1, source: 'Test' }), 'status-up');
+  assert.equal(model.marketStatusClass({ value: 1, previous_value: 2, source: 'Test' }), 'status-down');
+  assert.equal(model.marketStatusClass({ value: 1, previous_value: 1, source: 'Test' }), 'status-flat');
+  assert.equal(model.marketStatusClass({ value: null, previous_value: 1, source: 'Test' }), 'status-pending');
+  assert.equal(model.marketStatusClass({ value: 'invalid', previous_value: 1, source: 'Test' }), 'status-pending');
+  assert.equal(model.marketStatusClass({ value: 1, previous_value: 0, source: '待手工录入' }), 'status-pending');
+});
+
+test('Missing and invalid market values render explicit data states instead of numeric artifacts', () => {
+  const model = loadOverviewModel();
+  const missing = { name: 'Missing', symbol: 'MISS', value: null, previous_value: 1, value_unit: '%', source: 'Test', change_type: 'percent', as_of: '', frequency: '', is_manual: false };
+  const invalid = { name: 'Invalid', symbol: 'BAD', value: 'NaN', previous_value: 1, value_unit: '', source: 'Test', change_type: 'percent', as_of: '', frequency: '', is_manual: false };
+  assert.equal(model.simpleValue(missing), '暂无数据');
+  assert.equal(model.simpleChange(missing), '暂无数据');
+  assert.equal(model.simpleValue(invalid), '暂无数据');
+  assert.equal(model.simpleChange(invalid), '暂无数据');
+  for (const output of [model.overviewRow(missing, 'MISS'), model.overviewRow(invalid, 'BAD'), model.overviewRow(null, 'NONE')]) {
+    assert.doesNotMatch(output, /(?:NaN|undefined|null)/);
+  }
+});
+
 test('Overview keeps the stable ES5 and XMLHttpRequest loading path', () => {
   assert.doesNotMatch(app, /\b(?:const|let)\b/);
   assert.doesNotMatch(app, /=>/);
@@ -53,4 +100,5 @@ test('Overview defines Desktop, Tablet and Mobile layouts', () => {
   assert.match(css, /@media \(max-width: 760px\)/);
   assert.match(css, /repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(css, /repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /#overview \.ticker \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); overflow: hidden; \}/);
 });
