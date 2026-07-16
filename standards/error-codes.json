@@ -1,0 +1,10 @@
+{
+  "AUTH_REQUIRED": "Authentication is required",
+  "INVALID_TOKEN": "The supplied access token is invalid",
+  "AUTH_UNAVAILABLE": "The authentication service is unavailable",
+  "FORBIDDEN": "The authenticated user cannot perform this operation",
+  "VALIDATION_FAILED": "The request failed validation",
+  "NOT_FOUND": "The requested resource was not found",
+  "RLS_DENIED": "Row-level security denied the operation",
+  "INTERNAL_ERROR": "An unexpected internal error occurred"
+}

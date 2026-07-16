@@ -2,6 +2,8 @@
 
 本规范适用于所有未来功能、修复、重构和工程变更。发布流程同时遵循 [发布规范](06-RELEASE.md)，贡献步骤见 [贡献指南](10-CONTRIBUTING.md)。
 
+自动验收、Feature 脚手架、日志分类和错误码注册表见 [Engineering Foundation v1](ENGINEERING_FOUNDATION.md)；所有 PR 必须完成 [PR Checklist](CHECKLIST.md)。
+
 ## 项目目录结构
 
 ```text

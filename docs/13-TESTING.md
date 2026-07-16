@@ -1,5 +1,7 @@
 # 测试规范
 
+远程 Staging 的 Auth、Journal、RLS、公共数据、Editor 和登出回归统一使用 `npm run verify:staging`。执行前必须按 [Engineering Foundation v1](ENGINEERING_FOUNDATION.md) 配置专用测试账号与环境保护；发布验收使用 [Deployment Checklist](DEPLOY_CHECKLIST.md)。
+
 本文定义本地、Staging 和 Production 的统一验证标准。Debug 方法见 [Debug 手册](08-DEBUG.md)，发布门禁见 [发布规范](06-RELEASE.md)。
 
 ## 测试原则
