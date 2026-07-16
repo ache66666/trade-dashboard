@@ -8,6 +8,7 @@ v0.1–v0.5 根据现有 Git 历史整理，目前未补建对应 Git tag。
 
 ### Added
 
+- 重构 Market Overview 2.0：首页按七类市场状态组织代表指标，并预留 Today's Story 与 Recent Journal 产品入口。
 - 新增 Supabase Auth 基础链路：邮箱密码登录、Session 恢复、Token 自动刷新、统一 Bearer Token 验证和 `/api/auth/me`。
 - 新增认证自动化测试；公共市场 GET 保持开放，Production 写接口继续默认拒绝。
 - 建立长期维护文档体系、ADR 和 Feature 模板。

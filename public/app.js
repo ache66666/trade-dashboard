@@ -7,12 +7,13 @@
   var journalSymbols = ['DR007', 'CN10Y', 'T.CFE', 'DXY', 'USDCNY', 'CSI300', 'SPX', 'GOLD', 'WTI', 'VIX', 'MOVE'];
   var categories = ['流动性', '利率', '国债期货', '外汇', '股票', '商品', '波动率', '信用', '宏观日历'];
   var groups = [
-    { name: 'Rates', label: '利率', detail: '利率', symbols: ['DR007', 'CN10Y', 'US10Y', 'T.CFE'] },
-    { name: 'FX', label: '外汇', detail: '外汇', symbols: ['DXY', 'USDCNY', 'USDJPY', 'EURUSD'] },
+    { name: 'Liquidity', label: '流动性', detail: '流动性', symbols: ['R001', 'DR007'] },
+    { name: 'Rates', label: '利率', detail: '利率', symbols: ['CN10Y', 'US10Y', 'T.CFE', 'IRS5Y'] },
+    { name: 'FX', label: '外汇', detail: '外汇', symbols: ['DXY', 'USDCNY', 'USDJPY'] },
     { name: 'Equity', label: '权益', detail: '股票', symbols: ['CSI300', 'HSTECH', 'SPX', 'NDX'] },
     { name: 'Commodity', label: '商品', detail: '商品', symbols: ['GOLD', 'WTI', 'COPPER'] },
     { name: 'Credit', label: '信用', detail: '信用', symbols: ['AAA3Y', 'AA+3Y', 'AA3Y'] },
-    { name: 'Options', label: '期权与波动率', detail: '波动率', symbols: ['VIX', 'MOVE'] }
+    { name: 'Volatility', label: '波动率', detail: '波动率', symbols: ['VIX', 'MOVE'] }
   ];
   var publicConfig = window.__APP_CONFIG__ || {};
   var editorWriteEnabled = publicConfig.editorWriteEnabled === true;
@@ -170,11 +171,18 @@
     return change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
   }
 
+  function marketStatusClass(item) {
+    var change;
+    if (!item || item.source === '待手工录入') return 'status-pending';
+    change = Number(item.value) - Number(item.previous_value);
+    return change > 0 ? 'status-up' : change < 0 ? 'status-down' : 'status-flat';
+  }
+
   function overviewRow(item, symbol) {
-    if (!item) return '<div class="overview-missing"><b>' + symbol + '</b><span>暂无数据</span></div>';
-    return '<div class="overview-row"><div class="overview-name"><b>' + text(item.name) + '</b><small>' + text(item.symbol) + '</small></div>' +
-      '<div class="overview-quote"><strong>' + simpleValue(item) + '</strong><span class="' + simpleClass(item) + '">' + simpleChange(item) + '</span></div>' +
-      '<div class="overview-meta"><span>' + text(item.as_of) + ' · ' + text(item.frequency) + '</span><span>' + text(item.source) + '</span></div>' +
+    if (!item) return '<div class="overview-row status-pending"><div class="overview-name"><b>' + escapeHtml(symbol) + '</b><small>未配置数据</small></div><div class="overview-quote"><strong>暂无数据</strong><span>—</span></div><div class="overview-meta"><span>等待数据接入</span><span>—</span></div></div>';
+    return '<div class="overview-row ' + marketStatusClass(item) + '"><div class="overview-name"><b>' + escapeHtml(item.name) + '</b><small>' + escapeHtml(item.symbol) + '</small></div>' +
+      '<div class="overview-quote"><strong>' + escapeHtml(simpleValue(item)) + '</strong><span>' + escapeHtml(simpleChange(item)) + '</span></div>' +
+      '<div class="overview-meta"><span>' + escapeHtml(item.as_of) + ' · ' + escapeHtml(item.frequency) + '</span><span title="' + escapeHtml(item.source) + '">' + escapeHtml(item.source) + '</span></div>' +
       '<span class="update-badge ' + (item.is_manual ? 'manual' : 'auto') + '">' + (item.is_manual ? '手工维护' : '自动更新') + '</span></div>';
   }
 
@@ -205,7 +213,7 @@
     var ticker = byId('ticker');
     var html = '';
     var tickerHtml = '';
-    var tickerSymbols = ['CN10Y', 'US10Y', 'DXY', 'SPX', 'GOLD', 'VIX'];
+    var tickerSymbols = ['DR007', 'CN10Y', 'DXY', 'CSI300', 'GOLD', 'VIX'];
     var g;
     var s;
     var item;
@@ -221,7 +229,7 @@
     grid.innerHTML = html;
     for (s = 0; s < tickerSymbols.length; s += 1) {
       item = findSymbol(tickerSymbols[s]);
-      if (item) tickerHtml += '<div class="ticker-item"><small>' + item.symbol + '</small><b>' + simpleValue(item) + '</b><strong class="' + simpleClass(item) + '">' + simpleChange(item) + '</strong></div>';
+      if (item) tickerHtml += '<div class="ticker-item ' + marketStatusClass(item) + '"><small>' + escapeHtml(item.symbol) + '</small><b>' + escapeHtml(simpleValue(item)) + '</b><strong>' + escapeHtml(simpleChange(item)) + '</strong></div>';
     }
     ticker.innerHTML = tickerHtml;
   }
