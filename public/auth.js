@@ -8,6 +8,7 @@
   var refreshTimer = null;
   var refreshInFlight = false;
   var refreshCallbacks = [];
+  var recoveryAccessToken = null;
 
   function configured() {
     return config.authConfigured === true && Boolean(config.supabaseUrl) && Boolean(config.supabasePublishableKey);
@@ -55,9 +56,9 @@
     refreshTimer = window.setTimeout(function () { refreshSession(function () {}); }, delay);
   }
 
-  function authRequest(path, body, accessToken, callback) {
+  function authRequestWithMethod(method, path, body, accessToken, callback) {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', config.supabaseUrl + path, true);
+    xhr.open(method, config.supabaseUrl + path, true);
     xhr.timeout = 10000;
     xhr.setRequestHeader('apikey', config.supabasePublishableKey);
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -66,11 +67,56 @@
       var data = null;
       try { data = JSON.parse(xhr.responseText || '{}'); } catch (error) {}
       if (xhr.status >= 200 && xhr.status < 300) callback(null, data || {});
-      else callback(new Error('身份验证失败'));
+      else {
+        var requestError = new Error('身份验证失败');
+        requestError.code = String(data && (data.error_code || data.code) || 'AUTH_REJECTED').toUpperCase();
+        requestError.status = xhr.status;
+        callback(requestError);
+      }
     };
-    xhr.onerror = function () { callback(new Error('身份服务网络错误')); };
-    xhr.ontimeout = function () { callback(new Error('身份服务请求超时')); };
+    xhr.onerror = function () { var error = new Error('网络异常，请稍后重试'); error.code = 'NETWORK_ERROR'; callback(error); };
+    xhr.ontimeout = function () { var error = new Error('身份服务暂时不可用'); error.code = 'REQUEST_TIMEOUT'; callback(error); };
     xhr.send(JSON.stringify(body || {}));
+  }
+
+  function authRequest(path, body, accessToken, callback) {
+    authRequestWithMethod('POST', path, body, accessToken, callback);
+  }
+
+  function redirectUrl() {
+    return window.location.origin + window.location.pathname;
+  }
+
+  function consumeAuthCallback() {
+    var hash = String(window.location.hash || '').replace(/^#/, '');
+    var parts;
+    var values = {};
+    var i;
+    var pair;
+    if (!hash) return null;
+    parts = hash.split('&');
+    for (i = 0; i < parts.length; i += 1) {
+      pair = parts[i].split('=');
+      values[decodeURIComponent(pair[0] || '')] = decodeURIComponent(pair.slice(1).join('=') || '');
+    }
+    if (values.access_token || values.refresh_token || values.type) {
+      window.history.replaceState(null, window.document.title, window.location.pathname + window.location.search);
+    }
+    if (values.type === 'recovery' && values.access_token) return { type:'recovery', accessToken:values.access_token };
+    if (values.type === 'signup' || values.type === 'email_change') return { type:'verified' };
+    return null;
+  }
+
+  function friendlyError(error, fallback) {
+    var code = String(error && error.code || '').toUpperCase();
+    if (code === 'EMAIL_EXISTS' || code === 'USER_ALREADY_EXISTS' || code === 'IDENTITY_ALREADY_EXISTS') return '邮箱已注册，请直接登录';
+    if (code === 'EMAIL_NOT_CONFIRMED') return '邮箱尚未验证，请先完成邮箱验证';
+    if (code === 'INVALID_LOGIN_CREDENTIALS' || code === 'INVALID_CREDENTIALS') return '邮箱或密码错误';
+    if (code === 'WEAK_PASSWORD') return '密码强度不足，请至少使用 8 位字符';
+    if (code === 'OVER_EMAIL_SEND_RATE_LIMIT' || code === 'OVER_REQUEST_RATE_LIMIT') return '请求过于频繁，请稍后再试';
+    if (code === 'NETWORK_ERROR') return '网络异常，请稍后重试';
+    if (code === 'REQUEST_TIMEOUT') return '身份服务暂时不可用';
+    return fallback || '服务器异常，请稍后重试';
   }
 
   function finishRefresh(error) {
@@ -150,10 +196,11 @@
 
   function signIn(email, password, callback) {
     if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
-    emit({ loading:true });
+    emit({ loading:true, mode:'login' });
     authRequest('/auth/v1/token?grant_type=password', { email:email, password:password }, null, function (error, data) {
       var next;
-      if (error) { emit({ error:'邮箱或密码错误' }); callback(new Error('邮箱或密码错误')); return; }
+      var message;
+      if (error) { message = friendlyError(error, '邮箱或密码错误'); emit({ error:message, mode:'login' }); callback(new Error(message)); return; }
       next = normalize(data);
       if (!next) { emit({ error:'登录响应无效' }); callback(new Error('登录响应无效')); return; }
       session = next;
@@ -164,12 +211,66 @@
     });
   }
 
+  function signUp(email, password, callback) {
+    if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
+    emit({ loading:true, mode:'signup' });
+    authRequest('/auth/v1/signup?redirect_to=' + encodeURIComponent(redirectUrl()), { email:email, password:password }, null, function (error, data) {
+      var message;
+      var code = String(error && error.code || '').toUpperCase();
+      var maskedExistingUser = !error && data && data.user && data.user.identities && data.user.identities.length === 0;
+      var existingUserError = code === 'EMAIL_EXISTS' || code === 'USER_ALREADY_EXISTS' || code === 'IDENTITY_ALREADY_EXISTS';
+      if (maskedExistingUser || existingUserError) error = null;
+      if (error) {
+        message = friendlyError(error, '注册失败，请稍后重试');
+        emit({ error:message, mode:'signup' });
+        callback(new Error(message));
+        return;
+      }
+      emit({ message:'如果可以创建该账户，验证邮件将发送至该邮箱。请完成验证后登录。', mode:'signup-success' });
+      callback(null, { requiresEmailVerification:true });
+    });
+  }
+
+  function resetPasswordForEmail(email, callback) {
+    if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
+    emit({ loading:true, mode:'reset' });
+    authRequest('/auth/v1/recover?redirect_to=' + encodeURIComponent(redirectUrl()), { email:email }, null, function (error) {
+      var message;
+      if (error) {
+        message = friendlyError(error, '密码重置邮件发送失败，请稍后重试');
+        emit({ error:message, mode:'reset' });
+        callback(new Error(message));
+        return;
+      }
+      emit({ message:'密码重置邮件已发送。若该邮箱已注册，请按邮件提示操作。', mode:'reset' });
+      callback(null);
+    });
+  }
+
+  function updatePassword(password, callback) {
+    var token = recoveryAccessToken;
+    if (!configured() || !token) { callback(new Error('密码重置链接已失效，请重新申请')); return; }
+    emit({ loading:true, mode:'recovery-password' });
+    authRequestWithMethod('PUT', '/auth/v1/user', { password:password }, token, function (error) {
+      var message;
+      recoveryAccessToken = null;
+      if (error) {
+        message = friendlyError(error, '密码重置失败，请重新申请重置邮件');
+        emit({ error:message, mode:'login' });
+        callback(new Error(message));
+        return;
+      }
+      emit({ message:'密码已更新，请使用新密码登录。', mode:'login' });
+      callback(null);
+    });
+  }
+
   function signOut(callback) {
     var token = session && session.access_token;
     session = null;
     persist();
     clearRefreshTimer();
-    emit({});
+    emit({ message:'已退出登录', mode:'login' });
     if (!configured() || !token) { callback(null); return; }
     authRequest('/auth/v1/logout', {}, token, function () { callback(null); });
   }
@@ -199,8 +300,22 @@
 
   function init() {
     var raw;
+    var callbackState;
     var now = Math.floor(new Date().getTime() / 1000);
+    callbackState = consumeAuthCallback();
     if (!configured()) { emit({ disabled:true }); return; }
+    if (callbackState) {
+      session = null;
+      persist();
+      clearRefreshTimer();
+      if (callbackState.type === 'recovery') {
+        recoveryAccessToken = callbackState.accessToken;
+        emit({ message:'请设置新密码', mode:'recovery-password' });
+      } else {
+        emit({ message:'邮箱验证已完成，请登录。', mode:'login' });
+      }
+      return;
+    }
     try {
       raw = window.localStorage.getItem(storageKey);
       session = raw ? JSON.parse(raw) : null;
@@ -217,6 +332,9 @@
     init:init,
     onChange:function (listener) { listeners.push(listener); },
     signIn:signIn,
+    signUp:signUp,
+    resetPasswordForEmail:resetPasswordForEmail,
+    updatePassword:updatePassword,
     signOut:signOut,
     currentUser:currentUser,
     getSession:function () { return session; },
