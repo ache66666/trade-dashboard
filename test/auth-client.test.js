@@ -118,3 +118,55 @@ test('ES5 client logout clears the local Session even if the remote response is 
   assert.equal(harness.storage.has('market-workbench.auth.session.v1'), false);
   assert.equal(harness.requests[1].url, 'https://test.supabase.co/auth/v1/logout');
 });
+
+test('ES5 client registers through Supabase Auth without creating a local Session', () => {
+  const harness = browserHarness();
+  let result;
+  harness.auth.init();
+  harness.responses.push({ status:200, body:{ user:{ id:'pending-user', email:'new@example.com', identities:[{ id:'identity-1' }] }, session:null } });
+  harness.auth.signUp('new@example.com', 'safe-password', function (error, value) { result = { error, value }; });
+  assert.equal(result.error, null);
+  assert.equal(result.value.requiresEmailVerification, true);
+  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/signup');
+  assert.deepEqual(JSON.parse(harness.requests[0].body), { email:'new@example.com', password:'safe-password' });
+  assert.equal(harness.auth.getSession(), null);
+  assert.equal(harness.storage.has('market-workbench.auth.session.v1'), false);
+});
+
+test('ES5 client maps duplicate registration to a sanitized user message', () => {
+  const harness = browserHarness();
+  let result;
+  harness.responses.push({ status:200, body:{ user:{ id:'masked-user', identities:[] } } });
+  harness.auth.signUp('existing@example.com', 'safe-password', function (error) { result = error; });
+  assert.equal(result.message, '邮箱已注册，请直接登录');
+  assert.equal(harness.auth.getSession(), null);
+});
+
+test('ES5 client requests a reset email without exposing account existence', () => {
+  const harness = browserHarness();
+  let result = 'pending';
+  harness.responses.push({ status:200, body:{} });
+  harness.auth.resetPasswordForEmail('trader@example.com', function (error) { result = error; });
+  assert.equal(result, null);
+  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/recover');
+  assert.deepEqual(JSON.parse(harness.requests[0].body), { email:'trader@example.com' });
+});
+
+test('Auth errors are mapped without exposing the upstream response or credentials', () => {
+  const harness = browserHarness();
+  let result;
+  harness.responses.push({ status:400, body:{ error_code:'email_not_confirmed', msg:'RAW_UPSTREAM_DETAIL' } });
+  harness.auth.signIn('trader@example.com', 'private-password', function (error) { result = error; });
+  assert.equal(result.message, '邮箱尚未验证，请先完成邮箱验证');
+  assert.doesNotMatch(result.message, /RAW_UPSTREAM_DETAIL|private-password|test\.supabase\.co/);
+  assert.doesNotMatch(source, /console\.(?:log|debug|info)\s*\(/);
+});
+
+test('Persisted Session never contains the submitted password', () => {
+  const harness = browserHarness();
+  harness.responses.push({ status:200, body:{ access_token:'access-1', refresh_token:'refresh-1', expires_in:3600, user:{ id:'user-1', email:'trader@example.com' } } });
+  harness.auth.signIn('trader@example.com', 'private-password', function () {});
+  const persisted = harness.storage.get('market-workbench.auth.session.v1');
+  assert.ok(persisted);
+  assert.doesNotMatch(persisted, /private-password/);
+});

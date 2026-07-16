@@ -66,11 +66,28 @@
       var data = null;
       try { data = JSON.parse(xhr.responseText || '{}'); } catch (error) {}
       if (xhr.status >= 200 && xhr.status < 300) callback(null, data || {});
-      else callback(new Error('身份验证失败'));
+      else {
+        var requestError = new Error('身份验证失败');
+        requestError.code = String(data && (data.error_code || data.code) || 'AUTH_REJECTED').toUpperCase();
+        requestError.status = xhr.status;
+        callback(requestError);
+      }
     };
-    xhr.onerror = function () { callback(new Error('身份服务网络错误')); };
-    xhr.ontimeout = function () { callback(new Error('身份服务请求超时')); };
+    xhr.onerror = function () { var error = new Error('网络异常，请稍后重试'); error.code = 'NETWORK_ERROR'; callback(error); };
+    xhr.ontimeout = function () { var error = new Error('身份服务暂时不可用'); error.code = 'REQUEST_TIMEOUT'; callback(error); };
     xhr.send(JSON.stringify(body || {}));
+  }
+
+  function friendlyError(error, fallback) {
+    var code = String(error && error.code || '').toUpperCase();
+    if (code === 'EMAIL_EXISTS' || code === 'USER_ALREADY_EXISTS' || code === 'IDENTITY_ALREADY_EXISTS') return '邮箱已注册，请直接登录';
+    if (code === 'EMAIL_NOT_CONFIRMED') return '邮箱尚未验证，请先完成邮箱验证';
+    if (code === 'INVALID_LOGIN_CREDENTIALS' || code === 'INVALID_CREDENTIALS') return '邮箱或密码错误';
+    if (code === 'WEAK_PASSWORD') return '密码强度不足，请至少使用 8 位字符';
+    if (code === 'OVER_EMAIL_SEND_RATE_LIMIT' || code === 'OVER_REQUEST_RATE_LIMIT') return '请求过于频繁，请稍后再试';
+    if (code === 'NETWORK_ERROR') return '网络异常，请稍后重试';
+    if (code === 'REQUEST_TIMEOUT') return '身份服务暂时不可用';
+    return fallback || '服务器异常，请稍后重试';
   }
 
   function finishRefresh(error) {
@@ -150,10 +167,11 @@
 
   function signIn(email, password, callback) {
     if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
-    emit({ loading:true });
+    emit({ loading:true, mode:'login' });
     authRequest('/auth/v1/token?grant_type=password', { email:email, password:password }, null, function (error, data) {
       var next;
-      if (error) { emit({ error:'邮箱或密码错误' }); callback(new Error('邮箱或密码错误')); return; }
+      var message;
+      if (error) { message = friendlyError(error, '邮箱或密码错误'); emit({ error:message, mode:'login' }); callback(new Error(message)); return; }
       next = normalize(data);
       if (!next) { emit({ error:'登录响应无效' }); callback(new Error('登录响应无效')); return; }
       session = next;
@@ -164,12 +182,48 @@
     });
   }
 
+  function signUp(email, password, callback) {
+    if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
+    emit({ loading:true, mode:'signup' });
+    authRequest('/auth/v1/signup', { email:email, password:password }, null, function (error, data) {
+      var message;
+      if (!error && data && data.user && data.user.identities && data.user.identities.length === 0) {
+        error = new Error('邮箱已注册，请直接登录');
+        error.code = 'EMAIL_EXISTS';
+      }
+      if (error) {
+        message = friendlyError(error, '注册失败，请稍后重试');
+        emit({ error:message, mode:'signup' });
+        callback(new Error(message));
+        return;
+      }
+      emit({ message:'注册成功，请前往邮箱完成验证。验证完成后即可登录。', mode:'signup-success' });
+      callback(null, { requiresEmailVerification:true });
+    });
+  }
+
+  function resetPasswordForEmail(email, callback) {
+    if (!configured()) { callback(new Error('身份服务尚未配置')); return; }
+    emit({ loading:true, mode:'reset' });
+    authRequest('/auth/v1/recover', { email:email }, null, function (error) {
+      var message;
+      if (error) {
+        message = friendlyError(error, '密码重置邮件发送失败，请稍后重试');
+        emit({ error:message, mode:'reset' });
+        callback(new Error(message));
+        return;
+      }
+      emit({ message:'密码重置邮件已发送。若该邮箱已注册，请按邮件提示操作。', mode:'reset' });
+      callback(null);
+    });
+  }
+
   function signOut(callback) {
     var token = session && session.access_token;
     session = null;
     persist();
     clearRefreshTimer();
-    emit({});
+    emit({ message:'已退出登录', mode:'login' });
     if (!configured() || !token) { callback(null); return; }
     authRequest('/auth/v1/logout', {}, token, function () { callback(null); });
   }
@@ -217,6 +271,8 @@
     init:init,
     onChange:function (listener) { listeners.push(listener); },
     signIn:signIn,
+    signUp:signUp,
+    resetPasswordForEmail:resetPasswordForEmail,
     signOut:signOut,
     currentUser:currentUser,
     getSession:function () { return session; },
