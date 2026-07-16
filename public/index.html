@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260712-layout2"><link rel="stylesheet" href="journal.css?v=20260714-v01"><link rel="stylesheet" href="auth.css?v=20260715-auth-v01"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260716-overview2"><link rel="stylesheet" href="journal.css?v=20260714-v01"><link rel="stylesheet" href="auth.css?v=20260715-auth-v01"></head>
 <body><script>window.__APP_CONFIG__={environment:__APP_ENV_JSON__,debugPanelDefault:__DEBUG_PANEL_DEFAULT__,commit:__APP_COMMIT_JSON__,version:__APP_VERSION_JSON__,editorWriteEnabled:__EDITOR_WRITE_ENABLED__,authConfigured:__AUTH_CONFIGURED__,supabaseUrl:__SUPABASE_URL_JSON__,supabasePublishableKey:__SUPABASE_PUBLISHABLE_KEY_JSON__};</script>
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">M</span><div><b>MARKET PULSE</b><small>交易市场工作台</small></div></div>
@@ -21,10 +21,17 @@
     <header><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1 id="pageTitle">市场总览</h1><p id="pageDesc">用最少的数据，看清今天的市场方向。</p></div><div class="header-right"><span class="environment-badge" id="environmentBadge" hidden>STAGING</span><div class="datebox"><small>数据基准</small><b id="latestDate">—</b></div><button class="refresh" id="refreshBtn" data-editor-write-control __EDITOR_WRITE_HIDDEN__>↻ 刷新</button></div></header>
 
     <section class="page active" id="overview">
+      <div class="overview-intro">
+        <div><p class="eyebrow">TODAY'S MARKET</p><h2>Market Status</h2><p>先看总体方向，再看资产分化；颜色仅表示数值涨跌。</p></div>
+        <div class="status-legend" aria-label="市场状态图例"><span class="is-up"><i></i>上涨</span><span class="is-down"><i></i>下跌</span><span class="is-pending"><i></i>待录入</span></div>
+      </div>
       <div class="ticker" id="ticker"></div>
-      <div class="section-heading"><div><p class="eyebrow">MARKET OVERVIEW</p><h2>核心市场</h2></div><span>红涨绿跌 · 仅表示数值方向</span></div>
       <div class="overview-grid" id="overviewGrid"></div>
-      <div class="calendar-panel"><div class="panel-title"><div><p class="eyebrow">MACRO CALENDAR</p><h2>宏观日历</h2></div><button class="link-btn" data-go="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__>＋ 添加事件</button></div><div id="eventList"></div></div>
+      <div class="overview-lower-grid">
+        <article class="future-panel"><p class="eyebrow">TODAY'S STORY</p><h2>今天市场交易什么</h2><strong>Coming Soon</strong><p>下一阶段接入每日市场主线与主要驱动。</p></article>
+        <article class="future-panel"><p class="eyebrow">RECENT JOURNAL</p><h2>Trading Journal</h2><strong>Coming Soon</strong><p>后续在首页展示最近判断与待验证事项。</p><button class="group-link" data-go="journal">前往交易日志 <span>→</span></button></article>
+        <div class="calendar-panel"><div class="panel-title"><div><p class="eyebrow">MACRO CALENDAR</p><h2>宏观日历</h2></div><button class="link-btn" data-go="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__>＋ 添加事件</button></div><div id="eventList"></div></div>
+      </div>
     </section>
 
     <section class="page" id="journal">
@@ -79,5 +86,5 @@
   </main>
 
   <dialog id="editDialog"><form id="indicatorForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">DATA ENTRY</p><h2 id="dialogTitle">编辑指标</h2></div><button type="button" class="close" id="closeDialog">×</button></div><input type="hidden" name="id"><div class="form-grid"><label>指标代码 *<input name="symbol" required placeholder="例如 IRS5Y"></label><label>指标名称 *<input name="name" required placeholder="例如 FR007 IRS 5Y"></label><label>品类 *<select name="category" id="categorySelect" required></select></label><label>数值单位<input name="value_unit" placeholder="%、bp、美元/桶"></label><label>当前值 *<input type="number" step="any" name="value" required></label><label>前一交易日值 *<input type="number" step="any" name="previous_value" required></label><label>涨跌口径 *<select name="change_type"><option value="bp">bp（利率/利差）</option><option value="percent">百分比（价格资产）</option></select></label><label>数据日期 *<input type="date" name="as_of" required></label><label>数据来源 *<input name="source" required value="Wind 手工"></label><label>更新频率 *<input name="frequency" required value="Daily Close"></label><label>排序<input type="number" name="sort_order" value="99"></label><label class="check"><input type="checkbox" name="is_featured">加入市场总览</label></div><div class="dialog-actions"><button type="button" class="secondary" id="cancelDialog">取消</button><button class="primary" type="submit">保存到数据库</button></div><p class="form-error" id="formError"></p></form></dialog>
-  <div class="toast" id="toast"></div><script src="auth.js?v=20260715-auth-v01"></script><script src="app.js?v=20260715-auth-v01"></script>
+  <div class="toast" id="toast"></div><script src="auth.js?v=20260715-auth-v01"></script><script src="app.js?v=20260716-overview2"></script>
 </body></html>
