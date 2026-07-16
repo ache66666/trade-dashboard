@@ -8,7 +8,7 @@ const { test } = require('node:test');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../public/auth.js'), 'utf8');
 
-function browserHarness(storedSession) {
+function browserHarness(storedSession, locationHash) {
   const responses = [];
   const requests = [];
   const storage = new Map();
@@ -43,12 +43,15 @@ function browserHarness(storedSession) {
       setItem:(key, value) => storage.set(key, value),
       removeItem:key => storage.delete(key)
     },
+    location:{ origin:'https://staging.example.com', pathname:'/', search:'', hash:locationHash || '' },
+    history:{ replaceState:function (state, title, url) { window.location.hash = ''; window.location.replacedWith = url; } },
+    document:{ title:'Market Workbench' },
     setTimeout:function (fn, delay) { timers.push({ fn, delay }); return timers.length; },
     clearTimeout:function () {}
   };
   const context = { window, XMLHttpRequest:FakeXhr };
   vm.runInNewContext(source, context, { filename:'public/auth.js' });
-  return { auth:window.marketAuth, responses, requests, storage, timers };
+  return { auth:window.marketAuth, responses, requests, storage, timers, location:window.location };
 }
 
 test('ES5 client logs in and verifies the current user through Node API', () => {
@@ -127,18 +130,19 @@ test('ES5 client registers through Supabase Auth without creating a local Sessio
   harness.auth.signUp('new@example.com', 'safe-password', function (error, value) { result = { error, value }; });
   assert.equal(result.error, null);
   assert.equal(result.value.requiresEmailVerification, true);
-  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/signup');
+  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/signup?redirect_to=https%3A%2F%2Fstaging.example.com%2F');
   assert.deepEqual(JSON.parse(harness.requests[0].body), { email:'new@example.com', password:'safe-password' });
   assert.equal(harness.auth.getSession(), null);
   assert.equal(harness.storage.has('market-workbench.auth.session.v1'), false);
 });
 
-test('ES5 client maps duplicate registration to a sanitized user message', () => {
+test('ES5 client does not reveal whether a registration email already exists', () => {
   const harness = browserHarness();
   let result;
   harness.responses.push({ status:200, body:{ user:{ id:'masked-user', identities:[] } } });
-  harness.auth.signUp('existing@example.com', 'safe-password', function (error) { result = error; });
-  assert.equal(result.message, '邮箱已注册，请直接登录');
+  harness.auth.signUp('existing@example.com', 'safe-password', function (error, value) { result = { error, value }; });
+  assert.equal(result.error, null);
+  assert.equal(result.value.requiresEmailVerification, true);
   assert.equal(harness.auth.getSession(), null);
 });
 
@@ -148,8 +152,30 @@ test('ES5 client requests a reset email without exposing account existence', () 
   harness.responses.push({ status:200, body:{} });
   harness.auth.resetPasswordForEmail('trader@example.com', function (error) { result = error; });
   assert.equal(result, null);
-  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/recover');
+  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/recover?redirect_to=https%3A%2F%2Fstaging.example.com%2F');
   assert.deepEqual(JSON.parse(harness.requests[0].body), { email:'trader@example.com' });
+});
+
+test('Recovery callback strips tokens from the URL and updates the password without persisting a Session', () => {
+  const harness = browserHarness(null, '#access_token=recovery-token&refresh_token=unused&type=recovery');
+  let result;
+  harness.auth.init();
+  assert.equal(harness.location.hash, '');
+  assert.equal(harness.location.replacedWith, '/');
+  assert.equal(harness.storage.has('market-workbench.auth.session.v1'), false);
+  assert.equal(harness.auth.getSession(), null);
+  assert.equal(harness.requests.length, 0);
+  assert.equal(harness.storage.size, 0);
+  assert.equal(harness.auth.getSession(), null);
+  harness.responses.push({ status:200, body:{ user:{ id:'user-1' } } });
+  harness.auth.updatePassword('new-safe-password', function (error) { result = error; });
+  assert.equal(result, null);
+  assert.equal(harness.requests[0].method, 'PUT');
+  assert.equal(harness.requests[0].url, 'https://test.supabase.co/auth/v1/user');
+  assert.equal(harness.requests[0].headers.Authorization, 'Bearer recovery-token');
+  assert.deepEqual(JSON.parse(harness.requests[0].body), { password:'new-safe-password' });
+  assert.equal(harness.auth.getSession(), null);
+  assert.equal(harness.storage.has('market-workbench.auth.session.v1'), false);
 });
 
 test('Auth errors are mapped without exposing the upstream response or credentials', () => {

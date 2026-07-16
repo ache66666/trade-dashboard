@@ -12,10 +12,10 @@ const auth = fs.readFileSync(path.join(root, 'public/auth.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'public/auth.css'), 'utf8');
 
 test('Auth UI exposes login, signup, verification, reset and authenticated states', () => {
-  for (const id of ['authLoginForm', 'authSignupForm', 'authResetForm', 'authSignupSuccess', 'authSession', 'authLogoutBtn']) {
+  for (const id of ['authLoginForm', 'authSignupForm', 'authResetForm', 'authRecoveryForm', 'authSignupSuccess', 'authSession', 'authLogoutBtn']) {
     assert.match(html, new RegExp('id="' + id + '"'));
   }
-  assert.match(html, /请前往邮箱完成验证/);
+  assert.match(html, /验证邮件将发送至该邮箱/);
   assert.match(html, /忘记密码？/);
   assert.match(html, /退出登录/);
 });
@@ -27,6 +27,7 @@ test('Signup fields enforce email, password and confirmation input contracts', (
   assert.match(app, /password\.length < 8/);
   assert.match(app, /两次输入的密码不一致/);
   assert.match(app, /authActionInFlight/);
+  assert.match(app, /authClient\.updatePassword\(password/);
 });
 
 test('Auth UI keeps the ES5 and XMLHttpRequest compatibility path', () => {

@@ -78,18 +78,18 @@
   }
 
   function setAuthMode(mode) {
-    var ids = ['authLoginForm', 'authSignupForm', 'authResetForm', 'authSignupSuccess'];
-    var activeId = mode === 'signup' ? 'authSignupForm' : mode === 'reset' ? 'authResetForm' : mode === 'signup-success' ? 'authSignupSuccess' : 'authLoginForm';
+    var ids = ['authLoginForm', 'authSignupForm', 'authResetForm', 'authRecoveryForm', 'authSignupSuccess'];
+    var activeId = mode === 'signup' ? 'authSignupForm' : mode === 'reset' ? 'authResetForm' : mode === 'recovery-password' ? 'authRecoveryForm' : mode === 'signup-success' ? 'authSignupSuccess' : 'authLoginForm';
     var i;
     authMode = mode;
     for (i = 0; i < ids.length; i += 1) byId(ids[i]).hidden = ids[i] !== activeId;
     byId('authShowLogin').className = mode === 'login' ? 'auth-mode active' : 'auth-mode';
     byId('authShowSignup').className = mode === 'signup' ? 'auth-mode active' : 'auth-mode';
-    byId('authModeTabs').hidden = mode === 'reset' || mode === 'signup-success';
+    byId('authModeTabs').hidden = mode === 'reset' || mode === 'recovery-password' || mode === 'signup-success';
   }
 
   function setAuthBusy(loading) {
-    var ids = ['authLoginBtn', 'authSignupBtn', 'authResetBtn', 'authShowLogin', 'authShowSignup', 'authForgotBtn', 'authBackToLogin', 'authSuccessLogin', 'authLogoutBtn'];
+    var ids = ['authLoginBtn', 'authSignupBtn', 'authResetBtn', 'authRecoveryBtn', 'authShowLogin', 'authShowSignup', 'authForgotBtn', 'authBackToLogin', 'authSuccessLogin', 'authLogoutBtn'];
     var i;
     authActionInFlight = Boolean(loading);
     for (i = 0; i < ids.length; i += 1) if (byId(ids[i])) byId(ids[i]).disabled = authActionInFlight;
@@ -153,6 +153,7 @@
     var form = byId('authLoginForm');
     var signupForm = byId('authSignupForm');
     var resetForm = byId('authResetForm');
+    var recoveryForm = byId('authRecoveryForm');
     if (!authClient || !form) {
       renderAuthState({ configured:false, authenticated:false });
       return;
@@ -197,6 +198,19 @@
       if (!validEmail(email)) { showAuthValidation('请输入有效邮箱地址', 'reset'); return; }
       authClient.resetPasswordForEmail(email, function (error) {
         if (error) renderAuthState({ configured:true, authenticated:false, error:error.message, mode:'reset' });
+      });
+    };
+    recoveryForm.onsubmit = function (event) {
+      var password;
+      event.preventDefault();
+      if (authActionInFlight) return;
+      password = byId('authNewPassword').value;
+      if (password.length < 8) { showAuthValidation('密码至少需要 8 位字符', 'recovery-password'); return; }
+      if (password !== byId('authNewPasswordConfirm').value) { showAuthValidation('两次输入的密码不一致', 'recovery-password'); return; }
+      authClient.updatePassword(password, function (error) {
+        if (error) return;
+        byId('authNewPassword').value = '';
+        byId('authNewPasswordConfirm').value = '';
       });
     };
     byId('authShowLogin').onclick = function () { if (!authActionInFlight) setAuthMode('login'); };
