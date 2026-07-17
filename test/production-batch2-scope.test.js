@@ -14,8 +14,16 @@ const authServer = fs.readFileSync(path.join(root, 'auth.js'), 'utf8');
 const authClient = fs.readFileSync(path.join(root, 'public/auth.js'), 'utf8');
 const authUi = fs.readFileSync(path.join(root, 'public/auth-ui.js'), 'utf8');
 
+function normalizeLineEndings(content) {
+  return content.replace(/\r\n?/g, '\n');
+}
+
+function normalizedSha256(content) {
+  return crypto.createHash('sha256').update(normalizeLineEndings(content), 'utf8').digest('hex');
+}
+
 function sha256(file) {
-  return crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
+  return normalizedSha256(fs.readFileSync(path.join(root, file), 'utf8'));
 }
 
 test('Batch 2 contains Auth only and excludes Journal, Data API, migrations and seed tools', () => {
@@ -58,7 +66,15 @@ test('Batch 2 frontend uses XHR and injects only public Auth configuration', () 
   assert.doesNotMatch(html, /service[_ -]?role|sb_secret_|DATABASE_URL/i);
 });
 
-test('Batch 2 leaves the Market Overview loader and Production workflow byte-for-byte unchanged', () => {
-  assert.equal(sha256('public/app.js'), 'f2e1d164fac2d744fba491e898aa3a4f93b8ef11bd8b666b72b4b379d49bf331');
-  assert.equal(sha256('.github/workflows/production.yml'), 'f4516014027cd197ed754bf1d29744588791e0c4f3d01860d4a31372ee3b3b2e');
+test('normalized hashing is stable across LF, CRLF and CR line endings', () => {
+  const lf = 'first line\nsecond line\n';
+  const crlf = 'first line\r\nsecond line\r\n';
+  const cr = 'first line\rsecond line\r';
+  assert.equal(normalizedSha256(lf), normalizedSha256(crlf));
+  assert.equal(normalizedSha256(lf), normalizedSha256(cr));
+});
+
+test('Batch 2 leaves the Market Overview loader and Production workflow content unchanged', () => {
+  assert.equal(sha256('public/app.js'), '55772f8b0158949710e0254eb2233be28e46e0a19a8c030212017cad4e79264e');
+  assert.equal(sha256('.github/workflows/production.yml'), '1b07d59363afeb7412f28505d746fd629f6de40054bb4e2238345bcba115b7d8');
 });
