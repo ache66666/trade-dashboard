@@ -8,7 +8,6 @@ const ROOT = path.resolve(__dirname, '..');
 const ENV_FILE = path.join(ROOT, '.env.staging.local');
 const DATE_A = '2098-12-30';
 const DATE_B = '2098-12-31';
-const EXPECTED_COMMIT = '2cf4a79d6591cb4f7c449372ec1301895cc52dbb';
 
 function fail(message) {
   throw new Error(message);
@@ -56,6 +55,7 @@ function isAdministrativeKey(key) {
 
 function validateEnvironment(values) {
   const baseUrl = safeUrl(required(process.env, 'STAGING_BASE_URL'), 'STAGING_BASE_URL');
+  const expectedCommit = required(process.env, 'STAGING_EXPECTED_COMMIT');
   const supabaseUrl = safeUrl(required(values, 'SUPABASE_URL'), 'SUPABASE_URL');
   const projectRef = required(values, 'STAGING_DATABASE_PROJECT_REF');
   const requiredNames = [
@@ -67,6 +67,9 @@ function validateEnvironment(values) {
   ];
 
   if (values.APP_ENV !== 'staging') fail('Staging acceptance refused: APP_ENV must equal staging.');
+  if (!/^[0-9a-f]{40}$/i.test(expectedCommit)) {
+    fail('Staging acceptance refused: STAGING_EXPECTED_COMMIT must be a full Git SHA.');
+  }
   if (!supabaseUrl.hostname.endsWith('.supabase.co') || !supabaseUrl.hostname.startsWith(`${projectRef}.`)) {
     fail('Staging acceptance refused: Supabase project does not match the approved Staging project.');
   }
@@ -74,7 +77,7 @@ function validateEnvironment(values) {
   if (isAdministrativeKey(values.SUPABASE_PUBLISHABLE_KEY)) {
     fail('Staging acceptance refused: an administrative Supabase key is not allowed.');
   }
-  return { baseUrl:baseUrl.origin, supabaseUrl:supabaseUrl.origin, projectRef };
+  return { baseUrl:baseUrl.origin, supabaseUrl:supabaseUrl.origin, projectRef, expectedCommit:expectedCommit.toLowerCase() };
 }
 
 async function jsonRequest(url, options) {
@@ -172,7 +175,8 @@ async function main() {
   const config = {
     baseUrl:target.baseUrl,
     supabaseUrl:target.supabaseUrl,
-    key:values.SUPABASE_PUBLISHABLE_KEY
+    key:values.SUPABASE_PUBLISHABLE_KEY,
+    expectedCommit:target.expectedCommit
   };
   const completed = [];
   let userA;
@@ -184,7 +188,9 @@ async function main() {
   if (health.status !== 200 || !health.body || health.body.status !== 'ok' || health.body.environment !== 'staging' || health.body.database !== 'connected') {
     fail('Staging acceptance refused: health check does not identify a connected Staging deployment.');
   }
-  if (health.body.commit !== EXPECTED_COMMIT) fail('Staging acceptance refused: deployed commit is not the approved baseline.');
+  if (String(health.body.commit || '').toLowerCase() !== config.expectedCommit) {
+    fail('Staging acceptance refused: deployed commit is not the approved baseline.');
+  }
   completed.push('environment');
 
   userA = await login(config, values.JOURNAL_TEST_USER_A_EMAIL, values.JOURNAL_TEST_USER_A_PASSWORD);

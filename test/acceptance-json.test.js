@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { countJsonArray, parseJsonArray } = require('../scripts/lib/acceptance-json');
 
 test('acceptance JSON parser counts an empty array as zero', () => {
@@ -29,4 +31,11 @@ test('acceptance JSON parser rejects malformed JSON', () => {
     () => countJsonArray('not-json', 'broken response'),
     /broken response is not valid JSON/
   );
+});
+
+test('Staging RLS runner requires an explicit full expected deployment commit', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'verify-staging-journal-rls.js'), 'utf8');
+  assert.match(source, /required\(process\.env, 'STAGING_EXPECTED_COMMIT'\)/);
+  assert.match(source, /\^\[0-9a-f\]\{40\}\$/);
+  assert.doesNotMatch(source, /const EXPECTED_COMMIT\s*=/);
 });
