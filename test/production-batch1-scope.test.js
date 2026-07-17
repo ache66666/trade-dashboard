@@ -10,14 +10,12 @@ const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
 
-test('Production Batch 1 does not introduce Auth or Journal routes and resources', () => {
+test('Production Batch 1 remains free of Journal routes and resources after Auth Batch 2', () => {
   const combined = server + '\n' + html + '\n' + app;
-  assert.doesNotMatch(combined, /\/api\/auth\/me|\/api\/journal/);
-  assert.doesNotMatch(html, /(?:auth|journal)\.(?:js|css)/i);
-  assert.doesNotMatch(html, /data-page="journal"|data-go="journal"|id="auth/i);
-  assert.equal(fs.existsSync(path.join(root, 'auth.js')), false);
+  assert.doesNotMatch(combined, /\/api\/journal/);
+  assert.doesNotMatch(html, /journal\.(?:js|css)/i);
+  assert.doesNotMatch(html, /data-page="journal"|data-go="journal"/i);
   assert.equal(fs.existsSync(path.join(root, 'journal.js')), false);
-  assert.equal(fs.existsSync(path.join(root, 'public/auth.js')), false);
   assert.equal(fs.existsSync(path.join(root, 'public/journal.js')), false);
 });
 
