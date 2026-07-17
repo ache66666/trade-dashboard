@@ -5,7 +5,9 @@
   "description": "交易员市场数据工作台",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "journal:migration:production:dry-run": "node scripts/migrate-production-journal.js --dry-run",
+    "journal:migration:production": "node scripts/migrate-production-journal.js"
   },
   "engines": {
     "node": ">=22.5"
