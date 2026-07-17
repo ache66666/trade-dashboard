@@ -26,6 +26,11 @@ function safeReport(result) {
     executable:preflight.executable,
     mismatches:preflight.mismatches || []
   };
+  report.nextAction = result.status === 'executable'
+    ? 'Review this dry-run result before separately authorizing formal migration.'
+    : result.status === 'already-compliant'
+      ? 'No schema migration is required.'
+      : 'Stop. Resolve the reported state without automatic data changes.';
   if (preflight.state === 'legacy-with-data') {
     report.dateRange = { first:preflight.firstDate, last:preflight.lastDate };
   }
@@ -35,7 +40,7 @@ function safeReport(result) {
 function safeErrorMessage(error) {
   const message = String(error && error.message || '');
   if (/^Production Journal migration (?:refused|verification failed)/.test(message)) return message;
-  return 'Production Journal migration failed. No database changes were committed.';
+  return 'Production Journal migration failed or completion could not be confirmed. Verify database state before retrying.';
 }
 
 async function main() {
@@ -43,8 +48,9 @@ async function main() {
   assertProductionSafety(process.env, { requireConfirmation:!options.dryRun });
   const { getPool } = require('../database');
   const pool = getPool();
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     const result = await runProductionMigration({
       client,
       dryRun:options.dryRun,
@@ -53,7 +59,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify(safeReport(result), null, 2)}\n`);
     if (result.status === 'stopped') process.exitCode = 2;
   } finally {
-    client.release();
+    if (client) client.release();
     await pool.end();
   }
 }

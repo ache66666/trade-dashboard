@@ -33,10 +33,11 @@ function databaseTarget(value) {
   }
   const directHost = /^db\.([a-z0-9]+)\.supabase\.co$/i.exec(parsed.hostname);
   const poolerUser = /^postgres\.([a-z0-9]+)$/i.exec(decodeURIComponent(parsed.username || ''));
+  const poolerHost = /\.pooler\.supabase\.com$/i.test(parsed.hostname);
   if (directHost) projectRef = directHost[1].toLowerCase();
-  if (poolerUser) projectRef = poolerUser[1].toLowerCase();
+  if (poolerUser && poolerHost) projectRef = poolerUser[1].toLowerCase();
   return {
-    valid:parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:',
+    valid:(parsed.protocol === 'postgres:' || parsed.protocol === 'postgresql:') && Boolean(directHost || (poolerUser && poolerHost)),
     projectRef,
     database:decodeURIComponent(parsed.pathname.replace(/^\//, '') || '')
   };
@@ -46,7 +47,9 @@ function projectRefFromSupabaseUrl(value) {
   try {
     const parsed = new URL(String(value || ''));
     const match = /^([a-z0-9]+)\.supabase\.co$/i.exec(parsed.hostname);
-    return match ? match[1].toLowerCase() : '';
+    const cleanPath = parsed.pathname === '' || parsed.pathname === '/';
+    return match && parsed.protocol === 'https:' && !parsed.username && !parsed.password &&
+      cleanPath && !parsed.search && !parsed.hash ? match[1].toLowerCase() : '';
   } catch (error) {
     return '';
   }
@@ -58,19 +61,35 @@ function maskedProjectRef(value) {
   return `${ref.slice(0, 4)}...${ref.slice(-4)}`;
 }
 
-function knownStagingRefs(environment) {
-  return [
-    environment.STAGING_SUPABASE_PROJECT_REF,
-    environment.STAGING_DATABASE_PROJECT_REF,
-    projectRefFromSupabaseUrl(environment.STAGING_SUPABASE_URL),
-    databaseTarget(environment.STAGING_DATABASE_URL).projectRef
-  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+function verifiedStagingRefs(environment) {
+  const configuredRef = String(environment.STAGING_SUPABASE_PROJECT_REF || '').trim().toLowerCase();
+  if (!PROJECT_REF_PATTERN.test(configuredRef)) {
+    throw new Error('Production Journal migration refused: STAGING_SUPABASE_PROJECT_REF deny-list is required.');
+  }
+  const candidates = [configuredRef];
+  const explicitDatabaseRef = String(environment.STAGING_DATABASE_PROJECT_REF || '').trim().toLowerCase();
+  if (explicitDatabaseRef) candidates.push(explicitDatabaseRef);
+  if (environment.STAGING_SUPABASE_URL) {
+    const urlRef = projectRefFromSupabaseUrl(environment.STAGING_SUPABASE_URL);
+    if (!urlRef) throw new Error('Production Journal migration refused: Staging URL cannot be verified.');
+    candidates.push(urlRef);
+  }
+  if (environment.STAGING_DATABASE_URL) {
+    const databaseRef = databaseTarget(environment.STAGING_DATABASE_URL).projectRef;
+    if (!databaseRef) throw new Error('Production Journal migration refused: Staging database target cannot be verified.');
+    candidates.push(databaseRef);
+  }
+  if (candidates.some(value => !PROJECT_REF_PATTERN.test(value) || value !== configuredRef)) {
+    throw new Error('Production Journal migration refused: Staging deny-list configuration is inconsistent.');
+  }
+  return [...new Set(candidates)];
 }
 
 function assertProductionSafety(environment = process.env, options = {}) {
   const appEnv = String(environment.APP_ENV || '').trim().toLowerCase();
   const allowRef = String(environment.PRODUCTION_SUPABASE_PROJECT_REF || '').trim().toLowerCase();
   const target = databaseTarget(environment.DATABASE_URL);
+  const productionUrlRef = projectRefFromSupabaseUrl(environment.SUPABASE_URL);
   if (appEnv !== 'production') {
     throw new Error('Production Journal migration refused: APP_ENV must be production.');
   }
@@ -80,10 +99,10 @@ function assertProductionSafety(environment = process.env, options = {}) {
   if (!target.valid || !target.projectRef || !target.database) {
     throw new Error('Production Journal migration refused: database target cannot be verified.');
   }
-  if (target.projectRef !== allowRef) {
+  if (!productionUrlRef || target.projectRef !== allowRef || productionUrlRef !== allowRef) {
     throw new Error('Production Journal migration refused: database target does not match the Production allow-list.');
   }
-  if (knownStagingRefs(environment).includes(target.projectRef)) {
+  if (verifiedStagingRefs(environment).includes(target.projectRef)) {
     throw new Error('Production Journal migration refused: target matches a known Staging project.');
   }
   if (options.requireConfirmation === true &&
@@ -138,17 +157,55 @@ const REQUIRED_CHECKS = Object.freeze([
   'daily_market_notes_watchlist_array_check'
 ]);
 
+function normalizedDefinition(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function checkConstraintReady(constraint, name) {
+  if (!constraint || constraint.type !== 'CHECK') return false;
+  const definition = normalizedDefinition(constraint.definition);
+  const lower = definition.toLowerCase();
+  const canonical = lower.replace(/::text/g, '').replace(/[()\s]/g, '');
+  if (!/^CHECK \(/i.test(definition) || /\sOR\s/i.test(definition)) return false;
+  if (name === 'daily_market_notes_thesis_check') {
+    const expected = [
+      '流动性', '货币政策', '通胀', '经济增长', '风险偏好',
+      '地缘政治', '财政', '技术性因素', '暂无明确主线'
+    ];
+    const literals = [...definition.matchAll(/'((?:''|[^'])*)'/g)].map(match => match[1].replace(/''/g, "'"));
+    return (canonical.includes('thesisin') || canonical.includes('thesis=anyarray')) &&
+      literals.length === expected.length && expected.every(value => literals.includes(value));
+  }
+  if (name === 'daily_market_notes_summary_length_check') {
+    return canonical === 'checkchar_lengthsummarybetween1and200' ||
+      canonical === 'checkchar_lengthsummary>=1andchar_lengthsummary<=200';
+  }
+  const columnByName = {
+    daily_market_notes_supporting_array_check:'supporting_evidence',
+    daily_market_notes_opposing_array_check:'opposing_evidence',
+    daily_market_notes_watchlist_array_check:'watchlist'
+  };
+  const column = columnByName[name];
+  if (!column) return false;
+  if (name === 'daily_market_notes_watchlist_array_check') {
+    return canonical === "checkjsonb_typeofwatchlist='array'andjsonb_array_lengthwatchlist<=3";
+  }
+  return canonical === `checkjsonb_typeof${column}='array'`;
+}
+
 function sharedStructureMismatches(snapshot) {
   const mismatches = [];
   const constraints = snapshot.constraints || [];
   const indexes = snapshot.indexes || [];
-  const hasNamedConstraint = (name, type) => constraints.some(item => item.name === name && item.type === type);
-  if (!hasNamedConstraint('daily_market_notes_pkey', 'PRIMARY KEY')) mismatches.push('constraint:primary-key');
-  for (const name of REQUIRED_CHECKS) {
-    if (!hasNamedConstraint(name, 'CHECK')) mismatches.push(`constraint:${name}`);
+  const primaryKeys = constraints.filter(item => item.type === 'PRIMARY KEY' &&
+    /^PRIMARY KEY \(id\)$/i.test(normalizedDefinition(item.definition)));
+  if (primaryKeys.length !== 1) {
+    mismatches.push('constraint:primary-key');
   }
-  if (!indexes.some(item => item.name === 'daily_market_notes_updated_at_idx' &&
-      /\(updated_at DESC\)/i.test(String(item.definition)))) {
+  for (const name of REQUIRED_CHECKS) {
+    if (constraints.filter(item => checkConstraintReady(item, name)).length !== 1) mismatches.push(`constraint:${name}`);
+  }
+  if (!indexes.some(item => /USING btree \(updated_at DESC\)$/i.test(normalizedDefinition(item.definition)))) {
     mismatches.push('index:updated-at');
   }
   return mismatches;
@@ -157,9 +214,12 @@ function sharedStructureMismatches(snapshot) {
 function legacyStructureMismatches(snapshot) {
   const mismatches = columnMismatches(snapshot.columns, LEGACY_COLUMNS).concat(sharedStructureMismatches(snapshot));
   const constraints = snapshot.constraints || [];
-  if (!constraints.some(item => item.type === 'UNIQUE' && /^UNIQUE \(note_date\)$/i.test(String(item.definition)))) {
+  const legacyUnique = constraints.filter(item => item.type === 'UNIQUE' &&
+    /^UNIQUE \(note_date\)$/i.test(normalizedDefinition(item.definition)));
+  if (legacyUnique.length !== 1) {
     mismatches.push('constraint:legacy-date-unique');
   }
+  if (constraints.length !== 7) mismatches.push('constraint:unexpected-definition');
   return mismatches;
 }
 
@@ -168,9 +228,11 @@ function policyReady(policy, command) {
   const roles = Array.isArray(policy.roles) ? policy.roles : [];
   const using = String(policy.qual || '').replace(/[()\s]/g, '');
   const check = String(policy.with_check || '').replace(/[()\s]/g, '');
-  if (!roles.includes('authenticated')) return false;
-  if (command === 'SELECT' || command === 'DELETE') return using === 'auth.uid=user_id' || using === 'auth.uid()=user_id';
-  if (command === 'INSERT') return check === 'auth.uid=user_id' || check === 'auth.uid()=user_id';
+  if (roles.length !== 1 || roles[0] !== 'authenticated') return false;
+  if (command === 'SELECT' || command === 'DELETE') {
+    return !check && (using === 'auth.uid=user_id' || using === 'auth.uid()=user_id');
+  }
+  if (command === 'INSERT') return !using && (check === 'auth.uid=user_id' || check === 'auth.uid()=user_id');
   return (using === 'auth.uid=user_id' || using === 'auth.uid()=user_id') &&
     (check === 'auth.uid=user_id' || check === 'auth.uid()=user_id');
 }
@@ -184,7 +246,7 @@ function targetMismatches(snapshot) {
   const relation = snapshot.relation || {};
   const roleAttributes = snapshot.roleAttributes || [];
   const hasConstraint = (type, pattern) => constraints.some(item => item.type === type && pattern.test(String(item.definition)));
-  const hasGrant = (grants, role, privilege) => grants.some(item => item.grantee === role && item.privilege === privilege);
+  const privilegeSet = (grants, role) => new Set(grants.filter(item => item.grantee === role).map(item => item.privilege));
 
   if (!hasConstraint('UNIQUE', /^UNIQUE \(user_id, note_date\)$/i)) mismatches.push('constraint:user-date-unique');
   if (hasConstraint('UNIQUE', /^UNIQUE \(note_date\)$/i)) mismatches.push('constraint:legacy-date-unique');
@@ -196,10 +258,10 @@ function targetMismatches(snapshot) {
   if (['anon', 'authenticated', 'service_role'].includes(String(relation.owner || ''))) {
     mismatches.push('ownership:unsafe-table-owner');
   }
-  for (const role of roleAttributes) {
-    if (['anon', 'authenticated'].includes(role.name) && role.bypass_rls === true) {
-      mismatches.push(`role:${role.name}-bypassrls`);
-    }
+  for (const roleName of ['anon', 'authenticated']) {
+    const role = roleAttributes.find(item => item.name === roleName);
+    if (!role) mismatches.push(`role:${roleName}-missing`);
+    else if (role.bypass_rls === true) mismatches.push(`role:${roleName}-bypassrls`);
   }
   const expectedPolicies = [
     ['daily_market_notes_select_own', 'SELECT'],
@@ -208,22 +270,48 @@ function targetMismatches(snapshot) {
     ['daily_market_notes_delete_own', 'DELETE']
   ];
   for (const [name, command] of expectedPolicies) {
-    if (!policyReady(policies.find(item => item.name === name), command)) mismatches.push(`policy:${name}`);
+    if (policies.filter(item => policyReady(item, command)).length !== 1) mismatches.push(`policy:${name}`);
   }
-  for (const privilege of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
-    if (hasGrant(tableGrants, 'anon', privilege)) mismatches.push(`grant:anon-${privilege.toLowerCase()}`);
-    if (!hasGrant(tableGrants, 'authenticated', privilege)) mismatches.push(`grant:authenticated-${privilege.toLowerCase()}`);
+  if (policies.length !== 4) mismatches.push('policy:unexpected-definition');
+  const targetUnique = constraints.filter(item => item.type === 'UNIQUE' &&
+    /^UNIQUE \(user_id, note_date\)$/i.test(normalizedDefinition(item.definition)));
+  const targetForeignKey = constraints.filter(item => item.type === 'FOREIGN KEY' &&
+    /^FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT$/i.test(normalizedDefinition(item.definition)));
+  if (targetUnique.length !== 1 || targetForeignKey.length !== 1 || constraints.length !== 8) {
+    mismatches.push('constraint:unexpected-definition');
   }
-  if (hasGrant(sequenceGrants, 'anon', 'USAGE')) mismatches.push('grant:anon-sequence');
-  if (!hasGrant(sequenceGrants, 'authenticated', 'USAGE')) mismatches.push('grant:authenticated-sequence');
+  const expectedTablePrivileges = new Set(['SELECT', 'INSERT', 'UPDATE', 'DELETE']);
+  const authenticatedTablePrivileges = privilegeSet(tableGrants, 'authenticated');
+  if (privilegeSet(tableGrants, 'anon').size > 0) mismatches.push('grant:anon-table');
+  if (privilegeSet(tableGrants, 'service_role').size > 0) mismatches.push('grant:service-role-table');
+  if (privilegeSet(tableGrants, 'PUBLIC').size > 0) mismatches.push('grant:public-table');
+  for (const privilege of expectedTablePrivileges) {
+    if (!authenticatedTablePrivileges.has(privilege)) mismatches.push(`grant:authenticated-${privilege.toLowerCase()}`);
+  }
+  for (const privilege of authenticatedTablePrivileges) {
+    if (!expectedTablePrivileges.has(privilege)) mismatches.push(`grant:authenticated-extra-${privilege.toLowerCase()}`);
+  }
+  const authenticatedSequencePrivileges = privilegeSet(sequenceGrants, 'authenticated');
+  if (privilegeSet(sequenceGrants, 'anon').size > 0) mismatches.push('grant:anon-sequence');
+  if (privilegeSet(sequenceGrants, 'service_role').size > 0) mismatches.push('grant:service-role-sequence');
+  if (privilegeSet(sequenceGrants, 'PUBLIC').size > 0) mismatches.push('grant:public-sequence');
+  if (authenticatedSequencePrivileges.size !== 1 || !authenticatedSequencePrivileges.has('USAGE')) {
+    mismatches.push('grant:authenticated-sequence');
+  }
   return mismatches;
 }
 
 function classifySnapshot(snapshot) {
-  if (snapshot.tableExists !== true) {
+  if (snapshot.tableExists === false) {
     return { state:'table-absent', executable:true, recordCount:0, mismatches:[] };
   }
-  const count = Number(snapshot.recordCount || 0);
+  if (snapshot.tableExists !== true || !Array.isArray(snapshot.columns)) {
+    return { state:'partially-migrated', executable:false, recordCount:0, mismatches:['inspection:table-existence'] };
+  }
+  const count = Number(snapshot.recordCount);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    return { state:'partially-migrated', executable:false, recordCount:0, mismatches:['inspection:record-count'] };
+  }
   const hasUserId = snapshot.columns.some(row => row.column_name === 'user_id');
   if (!hasUserId) {
     const legacyIssues = legacyStructureMismatches(snapshot);
@@ -238,7 +326,9 @@ function classifySnapshot(snapshot) {
     };
   }
   const mismatches = targetMismatches(snapshot);
-  if (Number(snapshot.nullOwnerCount || 0) > 0) mismatches.unshift('data:null-user-id');
+  const nullOwnerCount = Number(snapshot.nullOwnerCount);
+  if (!Number.isSafeInteger(nullOwnerCount) || nullOwnerCount < 0) mismatches.unshift('inspection:null-owner-count');
+  else if (nullOwnerCount > 0) mismatches.unshift('data:null-user-id');
   if (mismatches.length > 0) {
     return { state:'partially-migrated', executable:false, recordCount:count, mismatches:[...new Set(mismatches)] };
   }
@@ -309,16 +399,40 @@ async function inspectMigrationState(client) {
        FROM pg_policies WHERE schemaname='public' AND tablename='daily_market_notes'`
   );
   const tableGrants = await client.query(
-    `SELECT grantee, privilege_type AS privilege
-       FROM information_schema.role_table_grants
-      WHERE table_schema='public' AND table_name='daily_market_notes'
-        AND grantee IN ('anon','authenticated')`
+    `WITH roles(grantee) AS (
+       VALUES ('anon'), ('authenticated'), ('service_role')
+     ), privileges(privilege) AS (
+       VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')
+     ), effective AS (
+       SELECT grantee, privilege FROM roles CROSS JOIN privileges
+        WHERE has_table_privilege(grantee, 'public.daily_market_notes', privilege)
+     ), public_acl AS (
+       SELECT 'PUBLIC'::text AS grantee, acl.privilege_type AS privilege
+         FROM pg_class c
+         CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) acl
+        WHERE c.oid='public.daily_market_notes'::regclass AND acl.grantee=0
+     )
+     SELECT grantee, privilege FROM effective
+     UNION ALL
+     SELECT grantee, privilege FROM public_acl`
   );
   const sequenceGrants = await client.query(
-    `SELECT grantee, privilege_type AS privilege
-       FROM information_schema.role_usage_grants
-      WHERE object_schema='public' AND object_name='daily_market_notes_id_seq'
-        AND grantee IN ('anon','authenticated')`
+    `WITH roles(grantee) AS (
+       VALUES ('anon'), ('authenticated'), ('service_role')
+     ), privileges(privilege) AS (
+       VALUES ('USAGE'), ('SELECT'), ('UPDATE')
+     ), effective AS (
+       SELECT grantee, privilege FROM roles CROSS JOIN privileges
+        WHERE has_sequence_privilege(grantee, 'public.daily_market_notes_id_seq', privilege)
+     ), public_acl AS (
+       SELECT 'PUBLIC'::text AS grantee, acl.privilege_type AS privilege
+         FROM pg_class c
+         CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, acldefault('S', c.relowner))) acl
+        WHERE c.oid='public.daily_market_notes_id_seq'::regclass AND acl.grantee=0
+     )
+     SELECT grantee, privilege FROM effective
+     UNION ALL
+     SELECT grantee, privilege FROM public_acl`
   );
   return classifySnapshot(Object.assign(base, {
     nullOwnerCount:Number(ownership.rows[0].null_owner_count),
@@ -341,11 +455,14 @@ function loadMigrationSql() {
 async function runProductionMigration(options) {
   const environment = options.environment || process.env;
   const dryRun = options.dryRun === true;
+  const allowTestOverrides = environment.NODE_ENV === 'test' &&
+    environment.ALLOW_MIGRATION_TEST_OVERRIDES === 'true';
   const target = assertProductionSafety(environment, { requireConfirmation:!dryRun });
   const client = options.client;
   await client.query(dryRun ? 'BEGIN READ ONLY' : 'BEGIN');
   try {
-    const inspectState = options.inspectState || inspectMigrationState;
+    const inspectState = allowTestOverrides && options.inspectState ? options.inspectState : inspectMigrationState;
+    if (!dryRun) await client.query('SELECT pg_advisory_xact_lock(749131, 3003)');
     const preflight = await inspectState(client);
     if (dryRun) {
       await client.query('ROLLBACK');
@@ -359,7 +476,14 @@ async function runProductionMigration(options) {
       await client.query('ROLLBACK');
       return { mode:'executable', status:'stopped', target, preflight };
     }
-    await client.query(options.migrationSql === undefined ? loadMigrationSql() : options.migrationSql);
+    if (preflight.state === 'legacy-empty') {
+      await client.query('LOCK TABLE public.daily_market_notes IN ACCESS EXCLUSIVE MODE');
+      const lockedPreflight = await inspectState(client);
+      if (lockedPreflight.state !== 'legacy-empty' || lockedPreflight.recordCount !== 0) {
+        throw new Error('Production Journal migration refused: legacy state changed before execution.');
+      }
+    }
+    await client.query(allowTestOverrides && options.migrationSql !== undefined ? options.migrationSql : loadMigrationSql());
     const verification = await inspectState(client);
     if (verification.state !== 'target-compliant') {
       throw new Error('Production Journal migration verification failed.');

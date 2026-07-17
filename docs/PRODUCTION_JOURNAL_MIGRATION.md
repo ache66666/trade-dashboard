@@ -12,8 +12,10 @@ The runner refuses to connect unless all of the following are true:
 
 - `APP_ENV=production`.
 - `PRODUCTION_SUPABASE_PROJECT_REF` is present.
-- the project ref derived from `DATABASE_URL` exactly matches the Production allow-list.
-- the target does not match any configured Staging project ref.
+- the project refs derived independently from `DATABASE_URL` and `SUPABASE_URL` exactly match the Production allow-list.
+- `STAGING_SUPABASE_PROJECT_REF` supplies a mandatory deny-list entry.
+- optional Staging URL and database evidence must resolve to that same deny-list ref.
+- the Production target does not match any verified Staging project ref.
 - formal execution additionally sets `PRODUCTION_JOURNAL_MIGRATION_CONFIRM=production-journal-migration`.
 
 Never store the formal confirmation value as a permanent Render environment variable. The publishable key and service-role key are not used by this migration.
@@ -58,14 +60,15 @@ The runner opens one transaction, repeats preflight inspection, applies the SQL 
 - SELECT, INSERT, UPDATE, and DELETE policies require `auth.uid() = user_id`.
 - `anon` has no table or sequence privileges.
 - `authenticated` has table CRUD and sequence `USAGE`; RLS remains the row boundary.
+- `service_role` and `PUBLIC` receive no table or sequence grant from this migration.
 - `anon` and `authenticated` must not have `BYPASSRLS`, and neither role may own the table.
 - Journal runtime access must use the user JWT through Supabase Data API. Service role and database-owner access are forbidden for user requests.
 
 ## Locking and rollback
 
-Creating or altering the table acquires PostgreSQL table locks. The only upgradeable legacy table must be empty, so the expected lock window is short. Run during a controlled release window and stop application Journal traffic before formal execution.
+Formal execution uses a transaction-scoped advisory lock to serialize this runner. A recognized empty legacy table is then locked with `ACCESS EXCLUSIVE` and re-inspected before any DDL. For an absent table, the server-side create block uses a non-conditional `CREATE TABLE` after its existence check, so a conflicting concurrent create fails the transaction instead of silently upgrading an unknown relation. The only upgradeable legacy table must be empty, so the expected lock window is short. Run during a controlled release window and stop application Journal traffic before formal execution.
 
-Before commit, rollback is automatic. After commit, prefer a forward correction: the schema contains no destructive data transformation. Dropping `user_id`, RLS, or the composite unique constraint would weaken security and is not an approved automatic rollback. If application publication fails, keep the secured schema and roll back application code separately.
+Before commit, rollback is automatic. If the client loses its connection while PostgreSQL is acknowledging `COMMIT`, completion may be ambiguous; never retry blindly, and run the separately authorized read-only inspection first. After a confirmed commit, prefer a forward correction: the schema contains no destructive data transformation. Dropping `user_id`, RLS, or the composite unique constraint would weaken security and is not an approved automatic rollback. If application publication fails, keep the secured schema and roll back application code separately.
 
 ## Verification checklist
 
