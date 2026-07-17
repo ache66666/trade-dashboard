@@ -9,6 +9,7 @@
     "seed:staging:dry-run": "node scripts/seed-staging.js --dry-run",
     "seed:staging": "node scripts/seed-staging.js",
     "verify:staging-seed": "node scripts/verify-staging-seed.js",
+    "verify:staging-journal-rls": "node scripts/verify-staging-journal-rls.js",
     "seed:staging:clean": "node scripts/clean-staging-seed.js",
     "migrate:staging:journal": "node scripts/migrate-staging-journal.js",
     "migrate:staging:journal-rls:dry-run": "node scripts/migrate-staging-journal-rls.js --dry-run",
