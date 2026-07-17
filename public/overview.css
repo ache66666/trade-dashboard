@@ -1,44 +1,110 @@
-/* Issue #001: dense trader-focused market overview */
-.environment-badge { display: inline-flex; align-items: center; border: 1px solid #c59032; background: #fff3cf; color: #7a5618; border-radius: 999px; padding: 5px 9px; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
-.environment-badge[hidden] { display: none; }
-#overview .ticker { margin-bottom: 22px; }
-#overview .ticker-item { display: grid; grid-template-columns: minmax(42px, auto) minmax(0, 1fr); grid-template-areas: "symbol value" "symbol change"; gap: 2px 8px; align-items: center; }
-#overview .ticker-item small { grid-area: symbol; min-width: 0; }
-#overview .ticker-item b { grid-area: value; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#overview .ticker-item strong { grid-area: change; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-#overview .section-heading { margin-bottom: 12px; }
-#overview .overview-grid { gap: 12px; margin-bottom: 26px; }
-#overview .market-group { box-shadow: 0 7px 22px rgba(20, 32, 29, .055); }
-#overview .group-head { padding: 12px 14px 10px; align-items: center; }
-#overview .group-head p { margin: 0 0 2px; color: var(--gold); font: 700 9px/1.2 Inter, sans-serif; letter-spacing: 1.4px; text-transform: uppercase; }
-#overview .group-head h3 { font-size: 14px; }
-.group-link { border: 0; background: none; color: var(--green); padding: 5px 0; font-size: 10px; cursor: pointer; white-space: nowrap; }
-.group-link:hover { text-decoration: underline; }
-.group-link span { margin-left: 3px; }
-.overview-list { display: grid; }
-.overview-row { position: relative; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(105px, .9fr); grid-template-areas: "name quote" "badge quote" "meta meta"; gap: 3px 12px; padding: 10px 14px 9px; border-bottom: 1px solid #efede8; min-height: 69px; }
-.overview-row:last-child, .overview-missing:last-child { border-bottom: 0; }
-.overview-name { grid-area: name; min-width: 0; }
-.overview-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.overview-name small { color: #989e9a; font-size: 9px; }
-.overview-quote { grid-area: quote; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; white-space: nowrap; }
-.overview-quote strong { font: 500 16px Georgia, serif; }
-.overview-quote span { font-size: 10px; font-weight: 700; }
-.overview-meta { grid-area: meta; min-width: 0; display: flex; justify-content: space-between; gap: 12px; color: #999; font-size: 8.5px; }
-.overview-meta span { min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.update-badge { grid-area: badge; position: static; justify-self: start; padding: 2px 5px; border-radius: 8px; font-size: 8px; line-height: 1.2; white-space: nowrap; }
-.update-badge.auto { color: #15725c; background: #e7f1ec; }
-.update-badge.manual { color: #826d39; background: #f3ecd9; }
-.overview-row.is-pending .overview-quote strong { color: var(--muted); font: 500 12px Inter, sans-serif; }
-.overview-missing { display: flex; justify-content: space-between; padding: 14px; color: var(--muted); border-bottom: 1px solid #efede8; font-size: 11px; }
-
-@media (min-width: 1280px) {
-  main { padding-top: 30px; }
-  header { padding-bottom: 18px; margin-bottom: 20px; }
-  #overview .ticker { margin-bottom: 18px; }
-  #overview .overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* Market Overview 2.0: dense, hierarchy-first trader dashboard. */
+#overview {
+  --overview-radius: 12px;
+  --overview-gap: 12px;
+  --status-up: #18725b;
+  --status-down: #b34f45;
+  --status-pending: #8b918e;
 }
 
-@media (max-width: 1100px) {
-  .overview-row { grid-template-columns: minmax(0, 1.15fr) minmax(95px, .85fr); }
+.environment-badge { display: inline-flex; align-items: center; border: 1px solid #c59032; background: #fff3cf; color: #7a5618; border-radius: 999px; padding: 5px 9px; font-size: 9px; font-weight: 800; letter-spacing: 1px; }
+.environment-badge[hidden] { display: none; }
+
+.overview-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 12px; }
+.overview-intro h2 { margin: 0 0 4px; font: 500 22px Georgia, "Songti SC", serif; }
+.overview-intro p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
+.status-legend { display: flex; align-items: center; gap: 14px; padding-bottom: 3px; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.status-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.status-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--status-pending); }
+.status-legend .is-up i { background: var(--status-up); }
+.status-legend .is-down i { background: var(--status-down); }
+
+#overview .ticker { margin-bottom: 12px; min-height: 52px; border-radius: var(--overview-radius); }
+#overview .ticker-item { display: grid; grid-template-columns: minmax(42px, auto) minmax(0, 1fr); grid-template-areas: "symbol value" "symbol change"; gap: 2px 8px; align-items: center; padding: 10px 14px; }
+#overview .ticker-item small { grid-area: symbol; min-width: 0; font-size: 9px; letter-spacing: .5px; }
+#overview .ticker-item b { grid-area: value; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#overview .ticker-item strong { grid-area: change; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+#overview .ticker-item.status-up strong { color: #65c99e; }
+#overview .ticker-item.status-down strong { color: #ef8e82; }
+#overview .ticker-item.status-pending strong { color: #9ba8a4; }
+
+#overview .overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--overview-gap); align-items: start; margin-bottom: 18px; }
+#overview .market-group { border-radius: var(--overview-radius); box-shadow: 0 8px 24px rgba(20, 32, 29, .055); }
+#overview .group-head { min-height: 49px; padding: 10px 13px 9px; align-items: center; }
+#overview .group-head p { margin: 0 0 2px; color: var(--gold); font: 700 8px/1.2 Inter, sans-serif; letter-spacing: 1.3px; text-transform: uppercase; }
+#overview .group-head h3 { margin: 0; font-size: 13px; }
+.group-link { border: 0; background: none; color: var(--green); padding: 5px 0; font-size: 9px; cursor: pointer; white-space: nowrap; }
+.group-link:hover { text-decoration: underline; }
+.group-link span { margin-left: 3px; }
+
+.overview-list { display: grid; }
+.overview-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(88px, auto); grid-template-areas: "name quote" "meta badge"; gap: 3px 10px; align-items: center; min-height: 57px; padding: 8px 13px; border-bottom: 1px solid #efede8; }
+.overview-row:last-child { border-bottom: 0; }
+.overview-name { grid-area: name; min-width: 0; }
+.overview-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
+.overview-name small { display: block; margin-top: 1px; color: #989e9a; font-size: 8px; }
+.overview-quote { grid-area: quote; min-width: 0; display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.overview-quote strong { overflow: hidden; text-overflow: ellipsis; font: 500 14px Georgia, serif; }
+.overview-quote span { flex: 0 0 auto; font-size: 8.5px; font-weight: 700; }
+.overview-row.status-up .overview-quote span { color: var(--status-up); }
+.overview-row.status-down .overview-quote span { color: var(--status-down); }
+.overview-row.status-flat .overview-quote span { color: var(--muted); }
+.overview-row.status-pending { background: #faf9f6; }
+.overview-row.status-pending .overview-quote strong,
+.overview-row.status-pending .overview-quote span { color: var(--status-pending); font-family: Inter, sans-serif; font-size: 9px; }
+.overview-meta { grid-area: meta; min-width: 0; display: flex; gap: 5px; color: #999; font-size: 7.5px; }
+.overview-meta span { min-width: 0; max-width: 58%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-meta span:last-child { max-width: 42%; }
+.update-badge { grid-area: badge; justify-self: end; padding: 2px 5px; border-radius: 8px; font-size: 7px; line-height: 1.2; white-space: nowrap; }
+.update-badge.auto { color: #15725c; background: #e7f1ec; }
+.update-badge.manual { color: #826d39; background: #f3ecd9; }
+
+.overview-lower-grid { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(180px, .75fr) minmax(420px, 1.5fr); gap: var(--overview-gap); align-items: stretch; }
+.future-panel,
+#overview .calendar-panel { min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: var(--overview-radius); background: var(--paper); box-shadow: 0 8px 24px rgba(20, 32, 29, .045); }
+.future-panel { padding: 17px 18px; }
+.future-panel h2 { margin: 0 0 13px; font: 500 16px Georgia, "Songti SC", serif; }
+.future-panel strong { display: inline-block; margin-bottom: 9px; color: var(--gold); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; }
+.future-panel > p:not(.eyebrow) { margin: 0 0 9px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+#overview .calendar-panel { padding: 15px 17px; }
+#overview .panel-title { margin-bottom: 5px; }
+#overview .panel-title h2 { font-size: 16px; }
+#overview .event { grid-template-columns: 68px 48px minmax(110px, 1fr) 34px 66px 66px; gap: 6px; padding: 8px 2px; font-size: 9px; }
+#overview .event time { font-size: 9px; }
+
+@media (min-width: 1200px) {
+  main { padding-top: 30px; }
+  header { padding-bottom: 18px; margin-bottom: 18px; }
+  #overview .overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  #overview .group-head { min-height: 45px; padding-top: 8px; padding-bottom: 7px; }
+  .overview-row { grid-template-columns: minmax(0, 1fr) minmax(74px, auto); gap: 1px 7px; min-height: 40px; padding: 4px 10px; }
+  .overview-name b { font-size: 9.5px; }
+  .overview-name small { font-size: 7px; }
+  .overview-quote { gap: 4px; }
+  .overview-quote strong { max-width: 72px; font-size: 12px; }
+  .overview-quote span { font-size: 7px; }
+  .overview-meta { font-size: 6.5px; }
+  .update-badge { font-size: 6px; }
+}
+
+@media (max-width: 1180px) {
+  #overview .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-lower-grid { grid-template-columns: 1fr 1fr; }
+  #overview .calendar-panel { grid-column: 1 / -1; }
+}
+
+@media (max-width: 760px) {
+  .overview-intro { display: block; }
+  .status-legend { margin-top: 10px; padding: 0; }
+  #overview .ticker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; }
+  #overview .ticker-item,
+  #overview .ticker-item:nth-child(n+3) { display: grid; min-width: 0; }
+  #overview .overview-grid,
+  .overview-lower-grid { grid-template-columns: 1fr; }
+  #overview .calendar-panel { grid-column: auto; overflow: hidden; }
+  .overview-row { grid-template-columns: minmax(0, 1fr) minmax(105px, auto); min-height: 61px; padding: 9px 13px; }
+  .overview-name b { font-size: 11px; }
+  .overview-quote strong { font-size: 15px; }
+  #overview .event { grid-template-columns: 58px 48px minmax(100px, 1fr); }
+  #overview .event > *:nth-child(n+4) { display: none; }
 }
