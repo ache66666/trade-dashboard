@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config');
 const logger = require('./logger');
+const { handleHealth } = require('./health');
 const { getPool, query, closePool } = require('./database');
 
 const PORT = config.port;
@@ -153,12 +154,7 @@ const server = http.createServer(async (req,res)=>{
       return json(res,403,{error:'Public data editing is currently disabled'});
     }
     if (url.pathname === '/api/health' && req.method === 'GET') {
-      try {
-        await query('SELECT 1');
-        return json(res,200,{ status:'ok', environment:config.appEnv, database:'connected' });
-      } catch {
-        return json(res,503,{ status:'error', environment:config.appEnv, database:'disconnected' });
-      }
+      return handleHealth({ query, sendJson:json, response:res, config });
     }
     if (url.pathname === '/api/dashboard' && req.method === 'GET') {
       const indicatorsResult = await query('SELECT * FROM indicators ORDER BY category,sort_order,name');
@@ -214,9 +210,11 @@ const server = http.createServer(async (req,res)=>{
     if(!exists||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found');}
     if (requested === 'index.html') {
       const html = fs.readFileSync(file, 'utf8')
-        .replace('__APP_ENV__', config.appEnv)
+        .replace('__APP_ENV_JSON__', JSON.stringify(config.appEnv))
         .replace('__DEBUG_PANEL_DEFAULT__', config.debugPanelDefault ? 'true' : 'false')
         .replace('__EDITOR_WRITE_ENABLED__', config.editorWriteEnabled ? 'true' : 'false')
+        .replace('__APP_COMMIT_JSON__', JSON.stringify(config.commit))
+        .replace('__APP_VERSION_JSON__', JSON.stringify(config.version))
         .replace(/__EDITOR_WRITE_HIDDEN__/g, config.editorWriteEnabled ? '' : 'hidden');
       const buffer = Buffer.from(html, 'utf8');
       res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
