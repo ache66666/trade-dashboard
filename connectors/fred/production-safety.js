@@ -62,6 +62,7 @@ function assertProductionSafety(environment, options = {}) {
   if (writeRequested && options.confirmation !== WRITE_CONFIRMATION) {
     throw new Error('FRED connector refused: explicit write confirmation is required.');
   }
+  if (writeRequested) productionPublicUrl(environment);
 
   return {
     environment:'production',

@@ -48,7 +48,8 @@ function validEnvironment(overrides = {}) {
     DATABASE_URL:'postgresql://postgres.prodref123@aws-0.pooler.supabase.com:6543/postgres',
     SUPABASE_URL:'https://prodref123.supabase.co',
     PRODUCTION_SUPABASE_PROJECT_REF:'prodref123',
-    STAGING_SUPABASE_PROJECT_REF:'stageref456'
+    STAGING_SUPABASE_PROJECT_REF:'stageref456',
+    PRODUCTION_PUBLIC_URL:'https://trade.example.com'
   }, overrides);
 }
 
@@ -198,6 +199,20 @@ test('Production writes require the exact explicit confirmation', () => {
   assert.equal(assertProductionSafety(validEnvironment(), {
     writeRequested:true, confirmation:'production-fred-mvp'
   }).mode, 'apply');
+});
+
+test('Production writes validate the API readback target before data access', () => {
+  for (const value of ['', 'http://trade.example.com', 'https://localhost:4173']) {
+    assert.throws(() => assertProductionSafety(validEnvironment({
+      PRODUCTION_PUBLIC_URL:value
+    }), {
+      writeRequested:true,
+      confirmation:'production-fred-mvp'
+    }), /readback URL/);
+  }
+  assert.equal(assertProductionSafety(validEnvironment({
+    PRODUCTION_PUBLIC_URL:''
+  }), { writeRequested:false }).mode, 'dry-run');
 });
 
 test('repository rejects symbols outside the three-indicator allow-list', async () => {
