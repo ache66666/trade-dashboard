@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260717-production-overview2"><link rel="stylesheet" href="auth.css?v=20260717-production-auth-v1"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Market Pulse · 市场工作台</title><link rel="stylesheet" href="styles.css?v=20260712"><link rel="stylesheet" href="overview.css?v=20260717-production-overview2"><link rel="stylesheet" href="auth.css?v=20260717-production-auth-v1"><link rel="stylesheet" href="journal.css?v=20260718-production-journal"></head>
 <body><script>window.__APP_CONFIG__={environment:__APP_ENV_JSON__,debugPanelDefault:__DEBUG_PANEL_DEFAULT__,editorWriteEnabled:__EDITOR_WRITE_ENABLED__,commit:__APP_COMMIT_JSON__,version:__APP_VERSION_JSON__,authConfigured:__AUTH_CONFIGURED__,supabaseUrl:__SUPABASE_URL_JSON__,supabasePublishableKey:__SUPABASE_PUBLISHABLE_KEY_JSON__};</script>
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">M</span><div><b>MARKET PULSE</b><small>交易市场工作台</small></div></div>
     <nav>
       <button class="nav active" data-page="overview"><span>⌁</span>市场总览</button>
+      <button class="nav" id="journalNav" data-page="journal" hidden><span>▤</span>交易日志</button>
       <button class="nav" data-page="details"><span>▦</span>详细数据</button>
       <button class="nav" data-page="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__><span>✎</span>数据维护</button>
     </nav>
@@ -35,9 +36,23 @@
       <div class="overview-grid" id="overviewGrid"></div>
       <div class="overview-lower-grid">
         <article class="future-panel"><p class="eyebrow">TODAY'S STORY</p><h2>今天市场交易什么</h2><strong>Coming Soon</strong><p>下一阶段接入每日市场主线与主要驱动。</p></article>
-        <article class="future-panel"><p class="eyebrow">RECENT JOURNAL</p><h2>Trading Journal</h2><strong>Coming Soon</strong><p>个人交易日志将在后续受控批次接入。</p></article>
+        <article class="future-panel"><p class="eyebrow">RECENT JOURNAL</p><h2>Trading Journal</h2><strong>每日训练</strong><p>记录市场主线、支持与反对证据及明日观察。</p><button class="group-link" id="journalOverviewLink" data-go="journal" hidden>前往交易日志 <span>→</span></button></article>
         <div class="calendar-panel"><div class="panel-title"><div><p class="eyebrow">MACRO CALENDAR</p><h2>宏观日历</h2></div><button class="link-btn" data-go="editor" data-editor-write-control __EDITOR_WRITE_HIDDEN__>＋ 添加事件</button></div><div id="eventList"></div></div>
       </div>
+    </section>
+
+    <section class="page" id="journal">
+      <div class="journal-toolbar"><div><p class="eyebrow">TRADING JOURNAL</p><h2>今日市场训练</h2><p>数据 → 判断 → 验证 → 复盘</p></div><label class="journal-date">日志日期<input type="date" id="journalDate"></label></div>
+      <section class="journal-section"><div class="journal-section-head"><div><span>01</span><div><p class="eyebrow">MARKET SNAPSHOT</p><h3>市场快照</h3></div></div><small>复用当前市场数据，不新增行情源</small></div><div class="journal-snapshot" id="journalSnapshot"></div></section>
+      <form id="journalForm">
+        <section class="journal-section journal-thesis"><div class="journal-section-head"><div><span>02</span><div><p class="eyebrow">MARKET THESIS</p><h3>市场主线</h3></div></div><small id="journalSaveState">尚未保存</small></div><div class="journal-thesis-grid"><label>交易主线<select name="thesis" required><option value="">请选择</option><option>流动性</option><option>货币政策</option><option>通胀</option><option>经济增长</option><option>风险偏好</option><option>地缘政治</option><option>财政</option><option>技术性因素</option><option>暂无明确主线</option></select></label><label>一句话判断 <span class="char-count" id="journalSummaryCount">0 / 200</span><textarea name="summary" maxlength="200" rows="4" required placeholder="例如：今日债市主要交易资金宽松预期。"></textarea></label></div></section>
+        <section class="journal-section"><div class="journal-section-head"><div><span>03</span><div><p class="eyebrow">EVIDENCE</p><h3>证据</h3></div></div><small>同时记录支持与反对，避免单向确认</small></div><div class="evidence-grid"><div class="evidence-panel support"><div class="evidence-title"><b>支持观点</b><small>SUPPORTING</small></div><div id="supportEvidence"></div></div><div class="evidence-panel oppose"><div class="evidence-title"><b>反对观点</b><small>OPPOSING</small></div><div id="opposeEvidence"></div></div></div></section>
+        <section class="journal-section"><div class="journal-section-head"><div><span>04</span><div><p class="eyebrow">TOMORROW WATCHLIST</p><h3>明日观察</h3></div></div><small>最多三条，次日更新验证状态</small></div><div class="watchlist-grid">
+          <div class="watch-item"><b>01</b><input name="watch_title_0" maxlength="80" placeholder="观察事项标题"><input name="watch_note_0" maxlength="200" placeholder="备注"><select name="watch_status_0"><option>未验证</option><option>已验证</option><option>与预期相反</option></select></div>
+          <div class="watch-item"><b>02</b><input name="watch_title_1" maxlength="80" placeholder="观察事项标题"><input name="watch_note_1" maxlength="200" placeholder="备注"><select name="watch_status_1"><option>未验证</option><option>已验证</option><option>与预期相反</option></select></div>
+          <div class="watch-item"><b>03</b><input name="watch_title_2" maxlength="80" placeholder="观察事项标题"><input name="watch_note_2" maxlength="200" placeholder="备注"><select name="watch_status_2"><option>未验证</option><option>已验证</option><option>与预期相反</option></select></div>
+        </div><div class="journal-actions"><span id="journalError"></span><button class="primary" type="submit" id="journalSaveBtn">保存今日日志</button></div></section>
+      </form>
     </section>
 
     <section class="page" id="details">
@@ -52,5 +67,5 @@
   </main>
 
   <dialog id="editDialog"><form id="indicatorForm" method="dialog"><div class="dialog-head"><div><p class="eyebrow">DATA ENTRY</p><h2 id="dialogTitle">编辑指标</h2></div><button type="button" class="close" id="closeDialog">×</button></div><input type="hidden" name="id"><div class="form-grid"><label>指标代码 *<input name="symbol" required placeholder="例如 IRS5Y"></label><label>指标名称 *<input name="name" required placeholder="例如 FR007 IRS 5Y"></label><label>品类 *<select name="category" id="categorySelect" required></select></label><label>数值单位<input name="value_unit" placeholder="%、bp、美元/桶"></label><label>当前值 *<input type="number" step="any" name="value" required></label><label>前一交易日值 *<input type="number" step="any" name="previous_value" required></label><label>涨跌口径 *<select name="change_type"><option value="bp">bp（利率/利差）</option><option value="percent">百分比（价格资产）</option></select></label><label>数据日期 *<input type="date" name="as_of" required></label><label>数据来源 *<input name="source" required value="Wind 手工"></label><label>更新频率 *<input name="frequency" required value="Daily Close"></label><label>排序<input type="number" name="sort_order" value="99"></label><label class="check"><input type="checkbox" name="is_featured">加入市场总览</label></div><div class="dialog-actions"><button type="button" class="secondary" id="cancelDialog">取消</button><button class="primary" type="submit">保存到数据库</button></div><p class="form-error" id="formError"></p></form></dialog>
-  <div class="toast" id="toast"></div><script src="auth.js?v=20260717-production-auth-v1"></script><script src="auth-ui.js?v=20260717-production-auth-v1"></script><script src="app.js?v=20260717-production-overview2"></script>
+  <div class="toast" id="toast"></div><script src="auth.js?v=20260717-production-auth-v1"></script><script src="auth-ui.js?v=20260717-production-auth-v1"></script><script src="app.js?v=20260718-production-journal"></script><script src="journal.js?v=20260718-production-journal"></script>
 </body></html>

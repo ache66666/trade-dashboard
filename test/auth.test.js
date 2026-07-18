@@ -12,6 +12,8 @@ const PUBLIC_KEY = 'sb_publishable_test_value';
 const indicators = [{ id:1, symbol:'TEST', name:'Test indicator' }];
 const events = [{ id:1, name:'Test event' }];
 let authCalls = 0;
+let dataApiCalls = 0;
+let lastDataApiRequest = null;
 let queryCalls = 0;
 let server;
 let baseUrl;
@@ -48,10 +50,20 @@ before(async () => {
 
   global.fetch = async function (url, options) {
     const token = String(options.headers.Authorization || '').replace(/^Bearer\s+/i, '');
+    if (String(url).startsWith('https://test.supabase.co/rest/v1/')) {
+      dataApiCalls += 1;
+      lastDataApiRequest = { url:String(url), options };
+      assert.equal(options.headers.apikey, PUBLIC_KEY);
+      if (token === 'data-error') return authResponse(500, { message:'RAW_DATA_INTERNAL' });
+      if (String(url).includes('/indicators')) return authResponse(200, [{ symbol:'TEST' }]);
+      if (options.method === 'POST') return authResponse(200, [JSON.parse(options.body)]);
+      return authResponse(options.method === 'DELETE' ? 204 : 200, []);
+    }
     authCalls += 1;
     assert.equal(url, 'https://test.supabase.co/auth/v1/user');
     assert.equal(options.headers.apikey, PUBLIC_KEY);
     if (token === 'valid-token') return authResponse(200, { id:'user-123', email:'trader@example.com', role:'ignored' });
+    if (token === 'data-error') return authResponse(200, { id:'user-123', email:'trader@example.com' });
     if (token === 'forbidden-token') return authResponse(403, { message:'RAW_FORBIDDEN' });
     if (token === 'service-error') return authResponse(500, { message:'RAW_AUTH_INTERNAL' });
     if (token === 'network-error') throw new Error('RAW_NETWORK_INTERNAL');
@@ -205,6 +217,62 @@ test('valid token returns only id and email without database access', async () =
   assert.equal(response.status, 200);
   assert.deepEqual(response.json, { id:'user-123', email:'trader@example.com' });
   assert.equal(queryCalls, beforeQueries);
+});
+
+for (const method of ['GET', 'PUT', 'DELETE']) {
+  test(`anonymous Journal ${method} is rejected before data access`, async () => {
+    const beforeData = dataApiCalls;
+    const beforeQueries = queryCalls;
+    const payload = method === 'PUT' ? { malformed:'payload', user_id:'attacker' } : undefined;
+    const response = await request(method, '/api/journal/2098-12-30?user_id=attacker', undefined, payload, { 'X-User-Id':'attacker' });
+    assert.equal(response.status, 401);
+    assert.deepEqual(response.json, { error:'Authentication required' });
+    assert.equal(dataApiCalls, beforeData);
+    assert.equal(queryCalls, beforeQueries);
+  });
+}
+
+test('authenticated Journal GET uses the verified user through Data API, not pg', async () => {
+  const beforeQueries = queryCalls;
+  const response = await request('GET', '/api/journal/2098-12-30?user_id=attacker', 'Bearer valid-token', undefined, { 'X-User-Id':'attacker' });
+  const url = new URL(lastDataApiRequest.url);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json, { date:'2098-12-30', note:null });
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-123');
+  assert.equal(lastDataApiRequest.options.headers.Authorization, 'Bearer valid-token');
+  assert.equal(queryCalls, beforeQueries);
+});
+
+test('authenticated Journal PUT ignores forged user_id and uses a composite upsert', async () => {
+  const beforeQueries = queryCalls;
+  const payload = {
+    user_id:'attacker', thesis:'流动性', summary:'test',
+    supporting_evidence:[{ symbol:'TEST', note:'evidence' }], opposing_evidence:[], watchlist:[]
+  };
+  const response = await request('PUT', '/api/journal/2098-12-30?user_id=attacker', 'Bearer valid-token', payload, { 'X-User-Id':'attacker' });
+  const sent = JSON.parse(lastDataApiRequest.options.body);
+  const url = new URL(lastDataApiRequest.url);
+  assert.equal(response.status, 200);
+  assert.equal(sent.user_id, 'user-123');
+  assert.equal(url.searchParams.get('on_conflict'), 'user_id,note_date');
+  assert.equal(queryCalls, beforeQueries);
+});
+
+test('authenticated Journal DELETE is scoped to the verified user', async () => {
+  const beforeQueries = queryCalls;
+  const response = await request('DELETE', '/api/journal/2098-12-30?user_id=attacker', 'Bearer valid-token', undefined, { 'X-User-Id':'attacker' });
+  const url = new URL(lastDataApiRequest.url);
+  assert.equal(response.status, 200);
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-123');
+  assert.equal(url.searchParams.get('note_date'), 'eq.2098-12-30');
+  assert.equal(queryCalls, beforeQueries);
+});
+
+test('Journal Data API errors are mapped to sanitized 503', async () => {
+  const response = await request('GET', '/api/journal/2098-12-30', 'Bearer data-error');
+  assert.equal(response.status, 503);
+  assert.deepEqual(response.json, { error:'Journal service unavailable' });
+  assert.doesNotMatch(response.text, /RAW_|token|supabase|stack|postgres/i);
 });
 
 for (const endpoint of ['/api/health', '/api/dashboard', '/api/dashboard-compat', '/api/indicators', '/api/events']) {

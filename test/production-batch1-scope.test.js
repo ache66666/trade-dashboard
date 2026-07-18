@@ -10,13 +10,11 @@ const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
 
-test('Production Batch 1 remains free of Journal routes and resources after Auth Batch 2', () => {
-  const combined = server + '\n' + html + '\n' + app;
-  assert.doesNotMatch(combined, /\/api\/journal/);
-  assert.doesNotMatch(html, /journal\.(?:js|css)/i);
-  assert.doesNotMatch(html, /data-page="journal"|data-go="journal"/i);
-  assert.equal(fs.existsSync(path.join(root, 'journal.js')), false);
-  assert.equal(fs.existsSync(path.join(root, 'public/journal.js')), false);
+test('later Journal runtime keeps Market Overview assets and loading path intact', () => {
+  assert.match(html, /overview\.css/);
+  assert.match(html, /id="overviewGrid"/);
+  assert.match(app, /\/api\/dashboard-compat/);
+  assert.doesNotMatch(app, /\bfetch\s*\(|\bPromise\b|\basync\b|\bawait\b/);
 });
 
 test('Production Batch 1 keeps the public dashboard APIs and Editor deny-list', () => {

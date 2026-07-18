@@ -84,6 +84,7 @@ async function requireAuth(req, res, options) {
       return null;
     }
     req.user = user;
+    req.auth = Object.freeze({ accessToken:token });
     return user;
   } catch (error) {
     if (options.logger) options.logger.warn('Authentication verification is temporarily unavailable');

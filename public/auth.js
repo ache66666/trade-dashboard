@@ -322,6 +322,7 @@
     updatePassword:updatePassword,
     signOut:signOut,
     currentUser:currentUser,
+    getAccessToken:getAccessToken,
     getSession:function () { return session; }
   };
 }(window));

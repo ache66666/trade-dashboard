@@ -175,12 +175,16 @@
       showError('数据维护功能暂未开放');
       return;
     }
+    if (page === 'journal' && window.marketPageAccess && !window.marketPageAccess(page)) {
+      showError('请先登录后使用交易日志');
+      return;
+    }
     var navs = all('.nav');
     var pages = all('.page');
     var i;
     for (i = 0; i < navs.length; i += 1) navs[i].className = navs[i].getAttribute('data-page') === page ? 'nav active' : 'nav';
     for (i = 0; i < pages.length; i += 1) pages[i].className = pages[i].id === page ? 'page active' : 'page';
-    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'details' ? '详细数据' : '数据维护';
+    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'journal' ? '交易日志' : page === 'details' ? '详细数据' : '数据维护';
   }
 
   function renderDetails() {
@@ -412,6 +416,11 @@
       report('XHR create/send', 'failed', error, '—');
     }
   }
+
+  window.marketWorkbench = Object.freeze({
+    showPage:showPage,
+    getIndicators:function () { return indicators.slice(0); }
+  });
 
   createStageBox();
   applyEditorWriteState();
