@@ -2,15 +2,23 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { adaptFredCsv, convertValue } = require('../connectors/fred/adapter');
 const { ALLOW_LIST, getIndicatorDefinition } = require('../connectors/fred/catalog');
 const { fetchFredCsv } = require('../connectors/fred/fetcher');
 const { assertProductionSafety } = require('../connectors/fred/production-safety');
 const { IndicatorRepository } = require('../connectors/fred/repository');
-const { runFredConnector, safeErrorCode } = require('../connectors/fred/runner');
+const {
+  readPublicIndicators, runFredConnector, safeErrorCode, verifyReadback
+} = require('../connectors/fred/runner');
 const { validateRecord } = require('../connectors/fred/validator');
 
 const NOW = new Date('2026-07-18T12:00:00Z');
+const TEST_TARGETS = Object.freeze({
+  productionProjectRefSha256:crypto.createHash('sha256').update('prodref123').digest('hex'),
+  stagingProjectRefSha256:crypto.createHash('sha256').update('stageref456').digest('hex'),
+  productionPublicOrigin:'https://trade.example.com'
+});
 
 function response(body, options = {}) {
   return {
@@ -51,6 +59,25 @@ function validEnvironment(overrides = {}) {
     STAGING_SUPABASE_PROJECT_REF:'stageref456',
     PRODUCTION_PUBLIC_URL:'https://trade.example.com'
   }, overrides);
+}
+
+function assertSafety(environment, options = {}) {
+  return assertProductionSafety(environment, Object.assign({}, options, { targetConfig:TEST_TARGETS }));
+}
+
+function publicRows() {
+  const targets = ALLOW_LIST.map((symbol, index) => Object.assign({
+    id:index + 1, name:symbol, value_unit:getIndicatorDefinition(symbol).databaseUnit,
+    is_featured:true, sort_order:index + 1, updated_at:'2026-07-17T00:00:00Z'
+  }, currentRow(symbol)));
+  const others = Array.from({ length:29 }, (value, index) => ({
+    id:index + 4, symbol:`OTHER${index + 1}`, name:`Other ${index + 1}`,
+    category:'Other', value:index, previous_value:index - 1, value_unit:'',
+    change_type:'percent', source:'baseline', as_of:'2026-07-16', frequency:'Daily',
+    is_manual:false, is_featured:false, sort_order:index + 4,
+    updated_at:'2026-07-17T00:00:00Z'
+  }));
+  return targets.concat(others);
 }
 
 test('FRED fetcher accepts a normal CSV response', async () => {
@@ -180,39 +207,105 @@ test('runner dry-run fetches and validates without writing', async () => {
 });
 
 test('Production safety fails closed for environment, target and allow-list errors', () => {
-  assert.throws(() => assertProductionSafety(validEnvironment({ APP_ENV:'staging' })), /APP_ENV/);
-  assert.throws(() => assertProductionSafety(validEnvironment({
+  assert.throws(() => assertSafety(validEnvironment({ APP_ENV:'staging' })), /APP_ENV/);
+  assert.throws(() => assertSafety(validEnvironment({
     DATABASE_URL:'postgresql://postgres.prodref123@localhost:5432/postgres'
   })), /cannot be verified/);
-  assert.throws(() => assertProductionSafety(validEnvironment({
+  assert.throws(() => assertSafety(validEnvironment({
     PRODUCTION_SUPABASE_PROJECT_REF:'anotherref'
-  })), /allow-list/);
-  assert.throws(() => assertProductionSafety(validEnvironment({
+  })), /Production reference/);
+  assert.throws(() => assertSafety(validEnvironment({
     STAGING_SUPABASE_PROJECT_REF:'prodref123'
-  })), /matches Staging/);
+  })), /Staging deny-list/);
 });
 
 test('Production writes require the exact explicit confirmation', () => {
-  assert.throws(() => assertProductionSafety(validEnvironment(), {
+  assert.throws(() => assertSafety(validEnvironment(), {
     writeRequested:true, confirmation:'wrong'
   }), /explicit write confirmation/);
-  assert.equal(assertProductionSafety(validEnvironment(), {
+  assert.equal(assertSafety(validEnvironment(), {
     writeRequested:true, confirmation:'production-fred-mvp'
   }).mode, 'apply');
 });
 
 test('Production writes validate the API readback target before data access', () => {
-  for (const value of ['', 'http://trade.example.com', 'https://localhost:4173']) {
-    assert.throws(() => assertProductionSafety(validEnvironment({
+  for (const value of ['http://trade.example.com', 'https://localhost:4173', 'https://other.example.com']) {
+    assert.throws(() => assertSafety(validEnvironment({
       PRODUCTION_PUBLIC_URL:value
     }), {
       writeRequested:true,
       confirmation:'production-fred-mvp'
     }), /readback URL/);
   }
-  assert.equal(assertProductionSafety(validEnvironment({
+  assert.equal(assertSafety(validEnvironment({
     PRODUCTION_PUBLIC_URL:''
   }), { writeRequested:false }).mode, 'dry-run');
+});
+
+test('Production safety derives public values while preserving hashed allow and deny lists', () => {
+  const environment = validEnvironment({
+    SUPABASE_URL:'', PRODUCTION_SUPABASE_PROJECT_REF:'',
+    STAGING_SUPABASE_PROJECT_REF:'', PRODUCTION_PUBLIC_URL:''
+  });
+  assert.equal(assertSafety(environment, { writeRequested:false }).environment, 'production');
+  assert.equal(assertSafety(environment, {
+    writeRequested:true, confirmation:'production-fred-mvp'
+  }).mode, 'apply');
+});
+
+test('public readback requires 32 unique indicator codes', async () => {
+  await assert.rejects(readPublicIndicators({}, async () => response(JSON.stringify(publicRows().slice(0, 31)))),
+    error => error.code === 'READBACK_INDICATOR_SET_INVALID');
+  const duplicates = publicRows();
+  duplicates[31] = Object.assign({}, duplicates[31], { symbol:duplicates[30].symbol });
+  await assert.rejects(readPublicIndicators({}, async () => response(JSON.stringify(duplicates))),
+    error => error.code === 'READBACK_INDICATOR_SET_INVALID');
+});
+
+test('apply preflight and readback verify targets and all 29 non-target rows', async () => {
+  const baseline = publicRows();
+  const rows = ALLOW_LIST.map(currentRow);
+  let applied = 0;
+  let apiReads = 0;
+  const result = await runFredConnector({
+    repository:{
+      readCurrent:async () => rows,
+      apply:async plans => { applied += 1; return { updated:plans.length }; }
+    },
+    dryRun:false,
+    environment:{},
+    now:() => NOW,
+    fetchImplementation:async url => {
+      if (url.endsWith('/api/indicators')) {
+        apiReads += 1;
+        const snapshot = baseline.map(row => {
+          const definition = ALLOW_LIST.includes(row.symbol) ? getIndicatorDefinition(row.symbol) : null;
+          return definition && apiReads === 2 ? Object.assign({}, row, {
+            value:4.25, previous_value:4.20, as_of:'2026-07-17',
+            source:definition.source, frequency:definition.frequency, is_manual:false
+          }) : row;
+        });
+        return response(JSON.stringify(snapshot));
+      }
+      const series = new URL(url).searchParams.get('id');
+      return response(csv(series));
+    }
+  });
+  assert.equal(applied, 1);
+  assert.equal(apiReads, 2);
+  assert.deepEqual(result.readback, { verified:3, indicatorCount:32, nonTargetVerified:29 });
+});
+
+test('readback rejects a change to any non-target indicator', async () => {
+  const before = publicRows();
+  const after = before.map(row => row.symbol === 'OTHER1' ? Object.assign({}, row, { value:999 }) : row);
+  const plans = ALLOW_LIST.map(symbol => {
+    const row = after.find(item => item.symbol === symbol);
+    return { symbol, to:{ observation_date:row.as_of, value:row.value, previous_value:row.previous_value } };
+  });
+  await assert.rejects(verifyReadback({}, plans,
+    async () => response(JSON.stringify(after)), before),
+  error => error.code === 'READBACK_NON_TARGET_CHANGED');
 });
 
 test('repository rejects symbols outside the three-indicator allow-list', async () => {

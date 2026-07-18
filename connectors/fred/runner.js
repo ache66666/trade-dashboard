@@ -6,6 +6,13 @@ const { adaptFredCsv } = require('./adapter');
 const { validateRecord } = require('./validator');
 const { productionPublicUrl } = require('./production-safety');
 
+const EXPECTED_INDICATOR_COUNT = 32;
+const PUBLIC_ROW_FIELDS = Object.freeze([
+  'id', 'symbol', 'name', 'category', 'value', 'previous_value', 'value_unit',
+  'change_type', 'source', 'as_of', 'frequency', 'is_manual', 'is_featured',
+  'sort_order', 'updated_at'
+]);
+
 function safeErrorCode(error) {
   return /^[A-Z0-9_]{3,80}$/.test(String(error && error.code || ''))
     ? error.code : 'FRED_CONNECTOR_FAILED';
@@ -30,17 +37,48 @@ function publicPlan(plan) {
   };
 }
 
-async function verifyReadback(environment, plans, fetchImplementation) {
+function connectorFailure(code) {
+  return Object.assign(new Error(code), { code });
+}
+
+function normalizedPublicRow(row) {
+  const normalized = {};
+  for (const field of PUBLIC_ROW_FIELDS) normalized[field] = row && row[field];
+  return JSON.stringify(normalized);
+}
+
+async function readPublicIndicators(environment, fetchImplementation) {
   const baseUrl = productionPublicUrl(environment);
-  const response = await fetchImplementation(`${baseUrl}/api/indicators`, {
-    method:'GET', headers:{ Accept:'application/json' }
-  });
-  if (!response || response.ok !== true) throw Object.assign(new Error('Readback failed.'), { code:'READBACK_HTTP_ERROR' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  let response;
   let rows;
-  try { rows = await response.json(); } catch (error) {
-    throw Object.assign(new Error('Readback failed.'), { code:'READBACK_JSON_INVALID' });
+  try {
+    response = await fetchImplementation(`${baseUrl}/api/indicators`, {
+      method:'GET', headers:{ Accept:'application/json' }, signal:controller.signal
+    });
+    if (!response || response.ok !== true) throw connectorFailure('READBACK_HTTP_ERROR');
+    rows = await response.json();
+  } catch (error) {
+    if (controller.signal.aborted || (error && error.name === 'AbortError')) {
+      throw connectorFailure('READBACK_TIMEOUT');
+    }
+    if (error && error.code) throw error;
+    throw connectorFailure('READBACK_JSON_INVALID');
+  } finally {
+    clearTimeout(timer);
   }
   if (!Array.isArray(rows)) throw Object.assign(new Error('Readback failed.'), { code:'READBACK_SHAPE_INVALID' });
+  if (rows.length !== EXPECTED_INDICATOR_COUNT ||
+      new Set(rows.map(row => row && row.symbol)).size !== EXPECTED_INDICATOR_COUNT) {
+    throw connectorFailure('READBACK_INDICATOR_SET_INVALID');
+  }
+  return rows;
+}
+
+async function verifyReadback(environment, plans, fetchImplementation, beforeRows) {
+  const rows = await readPublicIndicators(environment, fetchImplementation);
+  const targetSymbols = new Set(plans.map(plan => plan.symbol));
   for (const plan of plans) {
     const row = rows.find(item => item && item.symbol === plan.symbol);
     if (!row || String(row.as_of) !== plan.to.observation_date ||
@@ -48,7 +86,14 @@ async function verifyReadback(environment, plans, fetchImplementation) {
       throw Object.assign(new Error('Readback failed.'), { code:'READBACK_MISMATCH' });
     }
   }
-  return { verified:plans.length };
+  const beforeBySymbol = new Map(beforeRows.map(row => [row.symbol, row]));
+  for (const row of rows) {
+    if (!targetSymbols.has(row.symbol) &&
+        normalizedPublicRow(row) !== normalizedPublicRow(beforeBySymbol.get(row.symbol))) {
+      throw connectorFailure('READBACK_NON_TARGET_CHANGED');
+    }
+  }
+  return { verified:plans.length, indicatorCount:rows.length, nonTargetVerified:rows.length - plans.length };
 }
 
 async function runFredConnector(options) {
@@ -79,9 +124,18 @@ async function runFredConnector(options) {
     return { mode:'dry-run', updated:0, plans:plans.map(publicPlan) };
   }
 
+  const beforeRows = await readPublicIndicators(options.environment, fetchImplementation);
   const result = await repository.apply(plans);
-  const readback = await verifyReadback(options.environment, plans, fetchImplementation);
+  const readback = await verifyReadback(options.environment, plans, fetchImplementation, beforeRows);
   return { mode:'apply', updated:result.updated, readback, plans:plans.map(publicPlan) };
 }
 
-module.exports = { publicPlan, runFredConnector, safeErrorCode, verifyReadback };
+module.exports = {
+  EXPECTED_INDICATOR_COUNT,
+  normalizedPublicRow,
+  publicPlan,
+  readPublicIndicators,
+  runFredConnector,
+  safeErrorCode,
+  verifyReadback
+};

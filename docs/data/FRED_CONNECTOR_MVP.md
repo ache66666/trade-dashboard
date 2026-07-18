@@ -29,8 +29,8 @@ These indicators already exist in the Catalog and Production database. The conne
 A formal write is intentionally not wrapped in an npm shortcut. It requires all of the following in one operator-controlled command:
 
 - `APP_ENV=production`;
-- matching `DATABASE_URL`, `SUPABASE_URL`, and `PRODUCTION_SUPABASE_PROJECT_REF`;
-- a distinct, valid `STAGING_SUPABASE_PROJECT_REF` deny-list;
+- a `DATABASE_URL` whose parsed Project Ref matches the tracked Production hash allow-list;
+- a distinct tracked Staging Project Ref hash deny-list;
 - `--apply` and the exact explicit confirmation argument;
 - current-value read before writes;
 - all three records valid before the transaction begins;
@@ -38,6 +38,10 @@ A formal write is intentionally not wrapped in an npm shortcut. It requires all 
 - successful readback through the existing Production indicators API.
 
 Never store the confirmation argument in an environment file. This MVP has no scheduler and must not be invoked automatically.
+
+## Phase C schedule
+
+The optional `FRED Production Sync` workflow runs at 00:30 UTC (08:30 China Standard Time) on weekdays and supports manual dispatch. It uses a non-cancelling concurrency group, runs tests and a dry-run before one apply attempt, never calls the Render deploy hook, and writes a sanitized date/count summary. The workflow requires only the Production database connection and the explicit write confirmation as GitHub Production Environment Secrets.
 
 ## Failure behavior
 
