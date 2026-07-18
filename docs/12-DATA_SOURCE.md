@@ -1,141 +1,82 @@
-# 数据源目录
+# Data Source Catalog
 
-本文是指标来源、维护责任和自动化状态的统一登记入口。字段定义见 [数据字典](03-DATA_DICTIONARY.md)，自动化方向见 [AUTO_DATA](future/AUTO_DATA.md)。
+本文是 Market Workbench 数据源登记入口。结论来自 `sql/001_initial_schema.sql`、`server.js`、`public/app.js`、Editor 表单、测试以及只读检查的本地 SQLite 基线，不以 README 代替实现。
 
-## 管理原则
+机器可读版本见 [`data/data-source-catalog.csv`](data/data-source-catalog.csv)。来源评估、标准记录与批次计划分别见：
 
-1. 每项指标必须有来源、更新方式、频率和责任角色。
-2. 没有可靠数据时显示“待录入”或“暂无数据”，不得编造。
-3. 自动来源失败时保留上一次可信值并报告错误，不用空值覆盖。
-4. 商业数据和截图必须遵守授权，文档不保存账号、Token 或下载链接中的密钥。
-5. 来源、口径、单位或自动状态变更时，同步更新本文件、数据字典和 CHANGELOG。
-6. “负责人”目前记录角色；具体人员应在团队内部受控系统分配，不在公开仓库记录个人敏感信息。
+- [Source Evaluation](data/SOURCE_EVALUATION.md)
+- [Connector Architecture](data/CONNECTOR_ARCHITECTURE.md)
+- [Data Definition and Validation Rules](data/DATA_DEFINITIONS.md)
+- [Batch Implementation Plan](data/BATCH_PLAN.md)
+- [Open Questions / Manual Data List](data/OPEN_QUESTIONS.md)
 
-## 责任角色
+## 当前事实
 
-| 角色 | 职责 |
-| --- | --- |
-| 数据管理员 | 人工录入、日期/单位核对和异常确认 |
-| 自动数据维护 | 监控公开来源、解析器、刷新日志和失败恢复 |
-| 产品/市场负责人 | 指标定义、首页代表性、口径和来源接受度 |
-| 运维负责人 | Secret、任务运行、告警、备份和环境隔离 |
+- `indicators` 有 32 个唯一 `symbol`，分为流动性、利率、国债期货、外汇、股票、商品、信用、波动率 8 个数据库分类。
+- Market Overview 将数据库分类重组为 Liquidity、Rates、FX、Equity、Commodity、Credit、Volatility 7 个首页板块。
+- 当前表只保存最新值和前值，不保存历史序列；`change` 由前端按 `value` 与 `previous_value` 计算。
+- 当前服务端刷新覆盖 14 项：FRED 9 项、U.S. Treasury 3 项、ChinaBond 网页解析 2 项。按本目录的可靠性标准，其中 12 项为 A，ChinaBond 2 项为 B。
+- `macro_events` 当前为人工维护；官方发布日期可以自动化，但市场一致预期通常需要授权来源。
 
-## 指标统一模板
+## 自动化等级
 
-新增或换源时按以下字段登记：
+| 等级 | 定义 | 当前数量 |
+| --- | --- | ---: |
+| A | 稳定官方 API 或可靠程序化接口，可直接自动接入 | 12 |
+| B | 可程序化获取，但依赖非官方接口、网页解析、主力合约规则或稳定性一般 | 14 |
+| C | 暂时保留手工录入 | 6 |
+| D | 当前无可接受来源 | 0 |
 
-```text
-指标：
-来源：
-获取方式：
-更新时间：
-负责人：
-录入方式：
-是否自动：
-异常处理：
-未来计划：
-```
+宏观事件不计入上述 32 项：发布日期/时间可做到 B 级自动化，`forecast` 仍为 C 级人工维护。
 
-## 当前指标（32 项）
+## 完整指标目录
 
-### 流动性
+| 分类 | 代码 | 显示名称 | 单位 | 变化 | 当前方式 | 首选来源 / 序列 | 备用来源 | 等级 | 优先级 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Liquidity | `DR007` | DR007 | % | bp | 手工 | ChinaMoney 官方页面，经 AKShare adapter | 授权终端人工 | B | P2 |
+| Liquidity | `R001` | R001 | % | bp | 手工 | ChinaMoney 官方页面，经 AKShare adapter | 授权终端人工 | B | P2 |
+| Liquidity | `SOFR` | SOFR | % | bp | FRED 自动 | FRED `SOFR` | New York Fed | A | P1 |
+| Liquidity | `RRP` | 美联储隔夜逆回购 | 十亿美元 | percent | FRED 自动 | FRED `RRPONTSYD` | New York Fed | A | P1 |
+| China Rates | `CN10Y` | 中国国债 10Y | % | bp | ChinaBond 解析 | ChinaBond/CCDC 收益率曲线 | 人工核对 | B | P2 |
+| China Rates | `CN30Y` | 中国国债 30Y | % | bp | ChinaBond 解析 | ChinaBond/CCDC 收益率曲线 | 人工核对 | B | P2 |
+| China Rates | `IRS1Y` | FR007 IRS 1Y | % | bp | Wind 手工 | 授权 Wind/CFETS 数据 | 人工双录核对 | C | P3 |
+| China Rates | `IRS5Y` | FR007 IRS 5Y | % | bp | Wind 手工 | 授权 Wind/CFETS 数据 | 人工双录核对 | C | P3 |
+| US Rates | `US2Y` | 美国国债 2Y | % | bp | Treasury 自动 | U.S. Treasury `BC_2YEAR` | FRED `DGS2` | A | P1 |
+| US Rates | `US10Y` | 美国国债 10Y | % | bp | Treasury 自动 | U.S. Treasury `BC_10YEAR` | FRED `DGS10` | A | P1 |
+| US Rates | `US30Y` | 美国国债 30Y | % | bp | Treasury 自动 | U.S. Treasury `BC_30YEAR` | FRED `DGS30` | A | P1 |
+| Bond Futures | `T.CFE` | 10Y 国债期货主力 | — | percent | 手工 | CFFEX 日行情 + 主力规则 | Tushare/AKShare 核对 | B | P2 |
+| Bond Futures | `TL.CFE` | 30Y 国债期货主力 | — | percent | 手工 | CFFEX 日行情 + 主力规则 | Tushare/AKShare 核对 | B | P2 |
+| Bond Futures | `TF.CFE` | 5Y 国债期货主力 | — | percent | 手工 | CFFEX 日行情 + 主力规则 | Tushare/AKShare 核对 | B | P2 |
+| Bond Futures | `TS.CFE` | 2Y 国债期货主力 | — | percent | 手工 | CFFEX 日行情 + 主力规则 | Tushare/AKShare 核对 | B | P2 |
+| FX | `DXY` | 美元指数 | — | percent | 手工 | yfinance `DX-Y.NYB`（个人用途核验后） | 人工授权行情 | B | P2 |
+| FX | `USDCNY` | 美元/人民币 | — | percent | FRED 自动 | FRED `DEXCHUS` | Alpha Vantage `FX_DAILY` | A | P1 |
+| FX | `USDJPY` | 美元/日元 | — | percent | FRED 自动 | FRED `DEXJPUS` | Alpha Vantage `FX_DAILY` | A | P1 |
+| FX | `EURUSD` | 欧元/美元 | — | percent | FRED 自动 | FRED `DEXUSEU` | ECB SDMX（交叉汇率） | A | P1 |
+| Equity | `CSI300` | 沪深 300 | — | percent | Wind 截图 | Fuyao AI Cubes 指数行情 | Tushare/AKShare | B | P2 |
+| Equity | `HSTECH` | 恒生科技 | — | percent | 手工 | yfinance `^HSTECH`（个人用途核验后） | 授权港股数据 | B | P2 |
+| Equity | `SPX` | 标普 500 | — | percent | FRED 自动 | FRED `SP500` | Alpha Vantage / yfinance 核对 | A | P1 |
+| Equity | `NDX` | 纳斯达克 100 | — | percent | FRED 自动 | FRED `NASDAQ100` | Nasdaq Data Link（授权数据集） | A | P1 |
+| Commodity | `GOLD` | 黄金 | 美元/盎司 | percent | 手工 | Alpha Vantage `GOLD_SILVER_SPOT:GOLD` | yfinance `GC=F`（期货口径） | B | P2 |
+| Commodity | `WTI` | WTI 原油 | 美元/桶 | percent | FRED 自动 | FRED `DCOILWTICO` | Alpha Vantage `WTI` | A | P1 |
+| Commodity | `COPPER` | 伦铜 | 美元/吨 | percent | 手工 | yfinance `HG=F` 仅作代理，需口径换算 | 授权 LME 行情 | B | P2 |
+| Commodity | `SILVER` | 白银 | 美元/盎司 | percent | 手工 | Alpha Vantage `GOLD_SILVER_SPOT:SILVER` | yfinance `SI=F`（期货口径） | B | P2 |
+| Credit | `AAA3Y` | AAA 3Y 信用利差 | bp | bp | Wind 手工 | 授权中债曲线并按固定基准计算 | 人工双录核对 | C | P3 |
+| Credit | `AA+3Y` | AA+ 3Y 信用利差 | bp | bp | Wind 手工 | 授权中债曲线并按固定基准计算 | 人工双录核对 | C | P3 |
+| Credit | `AA3Y` | AA 3Y 信用利差 | bp | bp | Wind 手工 | 授权中债曲线并按固定基准计算 | 人工双录核对 | C | P3 |
+| Volatility | `VIX` | VIX | — | percent | FRED 自动 | FRED `VIXCLS` | Cboe 授权数据 | A | P1 |
+| Volatility | `MOVE` | MOVE | — | percent | 手工 | 授权 ICE BofA/MOVE 数据 | 人工核对 | C | P3 |
 
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `DR007` | 待手工录入 | 授权终端/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，不沿用伪造值 | 评估合规公开或授权接口 |
-| `R001` | 待手工录入 | 授权终端/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入 | 评估合规公开或授权接口 |
-| `SOFR` | FRED · SOFR | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留上次可信值并报告 series 错误 | 增加新鲜度和修订监控 |
-| `RRP` | FRED · RRPONTSYD | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留上次可信值，检查单位与日期 | 增加新鲜度和异常跳变校验 |
+## 宏观事件目录
 
-### 利率
+| 事件 | 日程首选来源 | 实际值首选来源 | 预期值 | 自动化建议 |
+| --- | --- | --- | --- | --- |
+| 中国 CPI | 国家统计局发布日历 | 国家统计局 | 人工/授权数据 | B：日程和实际值可抓取，预期人工 |
+| 中国 PMI | 国家统计局/CFLP | 国家统计局/CFLP | 人工/授权数据 | B：口径与发布时间需固定 |
+| 美国非农 | BLS Release Calendar | BLS Public Data API | 人工/授权数据 | A/B：实际值 A，事件记录 B |
+| FOMC | Federal Reserve FOMC Calendar | Federal Reserve statement | 人工判断 | B：日程可自动，政策结果结构化需人工复核 |
 
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `CN10Y` | ChinaBond · CCDC | 官方日度曲线页面/接口 | Daily Close | 自动数据维护 | 服务端刷新 | 是 | 解析失败保留旧值并记录 ChinaBond error | 建立稳定 adapter 与结构变化告警 |
-| `CN30Y` | ChinaBond · CCDC | 官方日度曲线页面/接口 | Daily Close | 自动数据维护 | 服务端刷新 | 是 | 同上，核对期限映射 | 增加期限映射测试 |
-| `IRS1Y` | Wind 手工 | 授权终端 | Daily Close | 数据管理员 | 页面维护 | 否 | 显示旧日期/待更新，人工复核 | 授权允许时评估受控集成 |
-| `IRS5Y` | Wind 手工 | 授权终端 | Daily Close | 数据管理员 | 页面维护 | 否 | 显示旧日期/待更新，人工复核 | 授权允许时评估受控集成 |
-| `US2Y` | U.S. Treasury | 官方 Treasury XML | Daily Close | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，记录 HTTP/解析错误 | 增加交易日和新鲜度校验 |
-| `US10Y` | U.S. Treasury | 官方 Treasury XML | Daily Close | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，核对日期和期限 | 增加来源状态监控 |
-| `US30Y` | U.S. Treasury | 官方 Treasury XML | Daily Close | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，核对日期和期限 | 增加来源状态监控 |
+## 当前数据库字段映射
 
-### 国债期货
+所有指标当前都写入同一组字段：`symbol`、`name`、`category`、`value`、`previous_value`、`value_unit`、`change_type`、`source`、`as_of`、`frequency`、`is_manual`、`is_featured`、`sort_order`、`updated_at`。Catalog 中的 `indicator_code` 对应 `symbol`，标准记录的 `observation_date` 对应 `as_of`。
 
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `T.CFE` | 待手工录入 | 授权行情终端 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入；核对主力合约切换 | 设计主力连续规则后评估自动化 |
-| `TL.CFE` | 待手工录入 | 授权行情终端 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入；核对主力合约切换 | 同上 |
-| `TF.CFE` | 待手工录入 | 授权行情终端 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入；核对主力合约切换 | 同上 |
-| `TS.CFE` | 待手工录入 | 授权行情终端 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入；核对主力合约切换 | 同上 |
-
-### 外汇
-
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `DXY` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，确认收盘口径 | 评估权威且许可清晰的自动源 |
-| `USDCNY` | FRED · DEXCHUS | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，注意报价方向和节假日 | 评估更及时的官方来源 |
-| `USDJPY` | FRED · DEXJPUS | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，校验报价方向 | 增加新鲜度监控 |
-| `EURUSD` | FRED · DEXUSEU | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，校验 FRED series 方向 | 评估 ECB 官方数据交叉验证 |
-
-### 股票
-
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `CSI300` | Wind 截图 | 授权终端截图/人工核对 | Daily Close | 数据管理员 | 页面维护 | 否 | 核对日期、点位和截图；失败保留旧日期 | 评估交易所/许可数据源 |
-| `HSTECH` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入 | 评估指数官方或许可接口 |
-| `SPX` | FRED · SP500 | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，检查缺失交易日 | 评估更及时但许可清晰的来源 |
-| `NDX` | FRED · NASDAQ100 | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，检查 series 可用性 | 增加来源交叉校验 |
-
-### 商品
-
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `GOLD` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，核对美元/盎司口径 | 评估官方基准或许可 API |
-| `WTI` | FRED · DCOILWTICO | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，识别缺失值与非交易日 | 增加新鲜度和异常价格检查 |
-| `COPPER` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，核对合约和美元/吨单位 | 明确连续合约后评估自动化 |
-| `SILVER` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，核对美元/盎司单位 | 评估官方基准或许可 API |
-
-### 信用
-
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `AAA3Y` | Wind 手工 | 授权终端 | Daily Close | 数据管理员 | 页面维护 | 否 | 核对评级、期限、利差口径和日期 | 许可允许时设计受控批量导入 |
-| `AA+3Y` | Wind 手工 | 授权终端 | Daily Close | 数据管理员 | 页面维护 | 否 | 同上 | 同上 |
-| `AA3Y` | Wind 手工 | 授权终端 | Daily Close | 数据管理员 | 页面维护 | 否 | 同上 | 同上 |
-
-### 波动率 / 期权
-
-| 指标 | 来源 | 获取方式 | 更新时间 | 负责人 | 录入方式 | 是否自动 | 异常处理 | 未来计划 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `VIX` | FRED · VIXCLS | 官方 CSV series | Daily | 自动数据维护 | 服务端刷新 | 是 | 保留旧值，检查日期和异常跳变 | 评估官方 CBOE 来源与授权 |
-| `MOVE` | 待手工录入 | 授权行情/人工核对 | Manual | 数据管理员 | 页面维护 | 否 | 显示待录入，核对收盘口径 | 评估许可数据源，不采用不稳定抓取 |
-
-## 宏观事件来源
-
-当前宏观事件通过页面人工录入，来源字段必填。录入人需核对事件时区、地区、重要性、前值、预期和实际值。未来自动日历源必须先解决许可、去重、时区和修订问题。
-
-## 自动来源运行规则
-
-| 来源 | 当前指标 | 失败策略 | 监控重点 |
-| --- | --- | --- | --- |
-| FRED | SOFR、RRP、WTI、USDCNY、USDJPY、EURUSD、SPX、NDX、VIX | 单项失败不覆盖原值，刷新结果标记 error | series 状态、日期、缺失值、频率 |
-| U.S. Treasury | US2Y、US10Y、US30Y | 整体请求/解析失败则不更新相关期限 | XML 结构、日期、期限映射 |
-| ChinaBond | CN10Y、CN30Y | 失败时保留旧值并报告 ChinaBond error | 页面结构、工作日、期限映射 |
-| 人工/Wind | 其余手工指标 | 显示待录入或旧日期，由数据管理员复核 | 授权、日期、单位、口径、审计 |
-
-## 来源变更流程
-
-1. 在 `docs/tasks/` 创建任务，记录旧来源、新来源和原因。
-2. 核对许可、定义、单位、时区、频率和历史差异。
-3. 更新本文件和 [数据字典](03-DATA_DICTIONARY.md)。
-4. 在 Staging 并行对比多个交易日。
-5. 定义失败、回退和异常跳变策略。
-6. 完成产品/市场负责人验收后再进入 Production。
-7. 发布后监控新鲜度、失败率和差异。
-
-## 后续治理
-
-- 为每项指标指定内部负责人和替补人，不在公开仓库记录私人联系方式。
-- 增加来源许可状态、最后成功时间、失败次数和新鲜度阈值。
-- 自动来源形成 adapter、验证、任务日志和告警标准。
-- 人工来源迁移按 [AUTO_DATA](future/AUTO_DATA.md#从人工迁移到自动) 执行。
+当前 Schema 无法安全保存历史序列、来源切换历史和抓取状态。本阶段不改 Schema；Batch 1 可以继续更新快照表，但进入历史回放前必须新增独立历史表，不能把多日数据塞进 `indicators`。
