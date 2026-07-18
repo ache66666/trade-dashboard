@@ -9,6 +9,7 @@
 - [Data Definition and Validation Rules](data/DATA_DEFINITIONS.md)
 - [Batch Implementation Plan](data/BATCH_PLAN.md)
 - [Open Questions / Manual Data List](data/OPEN_QUESTIONS.md)
+- [FRED Connector MVP](data/FRED_CONNECTOR_MVP.md)
 
 ## 当前事实
 

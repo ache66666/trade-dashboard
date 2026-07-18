@@ -1,5 +1,9 @@
 # Batch Implementation Plan
 
+## Phase B MVP: three-indicator FRED path
+
+The first implementation deliberately narrows the original Batch 1 proposal to `US10Y` (`DGS10`), `USDCNY` (`DEXCHUS`), and `WTI` (`DCOILWTICO`). It is Node-only, uses FRED's no-key official graph CSV endpoint, changes no schema or API, has no schedule, and defaults to a Production dry-run. See [FRED Connector MVP](FRED_CONNECTOR_MVP.md).
+
 ## Batch 1：官方全球日频快照
 
 **指标（12）**：SOFR、RRP、US2Y、US10Y、US30Y、USDCNY、USDJPY、EURUSD、SPX、NDX、WTI、VIX。
