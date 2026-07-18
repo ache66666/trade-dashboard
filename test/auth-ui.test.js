@@ -41,7 +41,7 @@ test('Auth frontend remains ES5 plus XMLHttpRequest', () => {
 test('Auth Widget is independent from Journal and Market Overview rendering', () => {
   const combined = auth + '\n' + authUi;
   assert.doesNotMatch(combined, /journal|data-page|data-go|renderOverview|renderAll/i);
-  assert.doesNotMatch(html, /data-page="journal"|data-go="journal"|id="journal/i);
+  assert.match(html, /<script src="auth\.js[^>]+><\/script><script src="auth-ui\.js/);
 });
 
 test('Auth styling covers status, disabled actions and mobile layout', () => {

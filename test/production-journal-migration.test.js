@@ -617,10 +617,11 @@ test('catalog query casts policy roles to text array for node-postgres', () => {
   assert.match(source, /roles::text\[\] AS roles/);
 });
 
-test('Batch 3A does not introduce Journal runtime, UI, workflow, seed or Staging runner files', () => {
+test('later Journal runtime does not alter Batch 3A workflow or introduce Staging tools', () => {
   for (const file of [
-    'journal.js', 'supabase-data.js', 'public/journal.js', 'public/journal.css',
     'scripts/seed-staging.js', 'scripts/run-staging-migration.js'
   ]) assert.equal(fs.existsSync(path.join(root, file)), false, file);
   assert.equal(fs.readFileSync(path.join(root, '.github/workflows/production.yml'), 'utf8').includes('journal:migration'), false);
+  const migration = fs.readFileSync(path.join(root, 'scripts/lib/production-journal-migration.js'), 'utf8');
+  assert.doesNotMatch(migration, /require\(['"]\.\.\/\.\.\/(?:journal|supabase-data)['"]\)/);
 });

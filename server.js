@@ -5,10 +5,13 @@ const config = require('./config');
 const logger = require('./logger');
 const { handleHealth } = require('./health');
 const { requireAuth } = require('./auth');
+const { validateJournal, validDate } = require('./journal');
+const { DATA_API_UNAVAILABLE, createSupabaseDataClient } = require('./supabase-data');
 const { getPool, query, closePool } = require('./database');
 
 const PORT = config.port;
 const ROOT = __dirname;
+const journalData = createSupabaseDataClient({ config });
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -39,6 +42,13 @@ function isEditorWriteRequest(req, url) {
   if (req.method === 'POST' && url.pathname === '/api/indicators') return true;
   if (req.method === 'POST' && url.pathname === '/api/events') return true;
   return req.method === 'PUT' && /^\/api\/indicators\/\d+$/.test(url.pathname);
+}
+function journalDateFromPath(pathname) {
+  const match = /^\/api\/journal\/(\d{4}-\d{2}-\d{2})$/.exec(pathname);
+  return match ? match[1] : null;
+}
+function isJournalRequest(req, url) {
+  return ['GET','PUT','DELETE'].includes(req.method) && Boolean(journalDateFromPath(url.pathname));
 }
 function body(req) { return new Promise((resolve,reject)=>{ let s=''; req.on('data',c=>{s+=c;if(s.length>1e6)reject(new Error('请求过大'));}); req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch(e){reject(e)}}); }); }
 function validateIndicator(x) {
@@ -159,6 +169,32 @@ const server = http.createServer(async (req,res)=>{
       if (!user) return;
       return json(res,200,user);
     }
+    if (isJournalRequest(req, url)) {
+      const noteDate = journalDateFromPath(url.pathname);
+      const user = await requireAuth(req, res, { config, logger, sendJson:json });
+      if (!user) return;
+      if (!validDate(noteDate)) return json(res,400,{error:'日志日期无效'});
+      if (req.method === 'GET') {
+        const rows = await journalData.getDailyNote(noteDate, user.id, req.auth.accessToken);
+        return json(res,200,{ date:noteDate, note:rows[0] || null });
+      }
+      if (req.method === 'DELETE') {
+        await journalData.deleteDailyNote(noteDate, user.id, req.auth.accessToken);
+        return json(res,200,{ date:noteDate, deleted:true });
+      }
+      const input = await body(req);
+      const validation = validateJournal(input);
+      if (validation.error) return json(res,400,{error:validation.error});
+      const selectedSymbols = validation.value.supporting_evidence
+        .concat(validation.value.opposing_evidence)
+        .map(item => item.symbol);
+      const indicatorRows = await journalData.findIndicatorSymbols(selectedSymbols, req.auth.accessToken);
+      const knownSymbols = new Set(indicatorRows.map(item => item.symbol));
+      const unknownSymbol = selectedSymbols.find(symbol => !knownSymbols.has(symbol));
+      if (unknownSymbol) return json(res,400,{error:'所选证据包含不存在的指标'});
+      const rows = await journalData.upsertDailyNote(noteDate, validation.value, user.id, req.auth.accessToken);
+      return json(res,200,{ date:noteDate, note:rows[0] || null });
+    }
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return handleHealth({ query, sendJson:json, response:res, config });
     }
@@ -232,6 +268,10 @@ const server = http.createServer(async (req,res)=>{
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
   } catch(e) {
+    if (e.code === DATA_API_UNAVAILABLE) {
+      logger.warn(`Journal data service unavailable: ${req.method} ${url.pathname}`);
+      return json(res,503,{error:'Journal service unavailable'});
+    }
     if (e.code === '23505') return json(res,409,{error:'代码已存在'});
     logger.error(`API request failed: ${req.method} ${url.pathname}: ${e.message}`);
     return json(res,500,{error:'Internal server error'});
@@ -260,4 +300,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, start, shutdown, isEditorWriteRequest };
+module.exports = { server, start, shutdown, isEditorWriteRequest, isJournalRequest, journalDateFromPath };

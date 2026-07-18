@@ -26,18 +26,10 @@ function sha256(file) {
   return normalizedSha256(fs.readFileSync(path.join(root, file), 'utf8'));
 }
 
-test('Batch 2 contains Auth only and excludes Journal, Data API, migrations and seed tools', () => {
-  const combined = server + '\n' + html + '\n' + authServer + '\n' + authClient + '\n' + authUi;
+test('Auth modules remain independent after Journal Runtime is added', () => {
+  const combined = authServer + '\n' + authClient + '\n' + authUi;
   assert.doesNotMatch(combined, /\/api\/journal|daily_market_notes|supabase-data|service[_ -]?role|sb_secret_/i);
-  assert.doesNotMatch(html, /data-page="journal"|data-go="journal"|id="journal|journal\.(?:js|css)/i);
-  for (const file of [
-    'journal.js',
-    'supabase-data.js',
-    'public/journal.js',
-    'public/journal.css',
-    'sql/002_daily_market_notes.sql',
-    'sql/003_daily_market_notes_user_rls.sql'
-  ]) assert.equal(fs.existsSync(path.join(root, file)), false, file);
+  assert.match(server, /\/api\/auth\/me/);
 });
 
 test('Auth server module cannot import or query the database', () => {
@@ -74,7 +66,6 @@ test('normalized hashing is stable across LF, CRLF and CR line endings', () => {
   assert.equal(normalizedSha256(lf), normalizedSha256(cr));
 });
 
-test('Batch 2 leaves the Market Overview loader and Production workflow content unchanged', () => {
-  assert.equal(sha256('public/app.js'), '55772f8b0158949710e0254eb2233be28e46e0a19a8c030212017cad4e79264e');
+test('later Runtime batches leave the Production workflow content unchanged', () => {
   assert.equal(sha256('.github/workflows/production.yml'), '1b07d59363afeb7412f28505d746fd629f6de40054bb4e2238345bcba115b7d8');
 });
