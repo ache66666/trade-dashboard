@@ -205,6 +205,57 @@ test('fully secured target is compliant', () => {
   assert.equal(migration.classifySnapshot(targetSnapshot()).state, 'target-compliant');
 });
 
+test('PostgreSQL array text and semantic catalog fields are accepted', () => {
+  const snapshot = targetSnapshot();
+  snapshot.policies = snapshot.policies.map(policy => Object.assign({}, policy, { roles:'{authenticated}' }));
+  snapshot.constraints = snapshot.constraints.map(item => {
+    if (item.type === 'PRIMARY KEY') return Object.assign({}, item, { columns:['id'] });
+    if (item.type === 'UNIQUE') return Object.assign({}, item, { columns:['user_id', 'note_date'] });
+    if (item.type === 'FOREIGN KEY') return Object.assign({}, item, {
+      columns:['user_id'], referenced_schema:'auth', referenced_table:'users',
+      referenced_columns:['id'], delete_action:'RESTRICT'
+    });
+    return item;
+  });
+  snapshot.indexes = [{
+    name:'semantic_index', columns:['updated_at'], is_unique:false, access_method:'btree', is_valid:true, is_ready:true,
+    first_desc:true, has_predicate:false, definition:'format intentionally ignored'
+  }];
+  assert.equal(migration.classifySnapshot(snapshot).state, 'target-compliant');
+});
+
+test('PostgreSQL array text parser rejects malformed or arbitrary strings', () => {
+  assert.deepEqual(migration.normalizedTextArray('{authenticated}'), ['authenticated']);
+  assert.deepEqual(migration.normalizedTextArray('{"authenticated"}'), ['authenticated']);
+  for (const value of ['authenticated', '{authenticated,}', '{authenticated,,anon}', '{authenticated}trailing', '{auth enticated}']) {
+    assert.deepEqual(migration.normalizedTextArray(value), []);
+  }
+});
+
+test('semantic validation still rejects wrong policy roles and foreign-key action', () => {
+  const snapshot = targetSnapshot();
+  snapshot.policies = snapshot.policies.map(policy => Object.assign({}, policy, { roles:'{authenticated,anon}' }));
+  snapshot.constraints = snapshot.constraints.map(item => item.type === 'FOREIGN KEY'
+    ? Object.assign({}, item, {
+      columns:['user_id'], referenced_schema:'auth', referenced_table:'users',
+      referenced_columns:['id'], delete_action:'CASCADE'
+    }) : item);
+  const result = migration.classifySnapshot(snapshot);
+  assert.ok(result.mismatches.includes('constraint:user-foreign-key'));
+  assert.ok(result.mismatches.includes('policy:daily_market_notes_select_own'));
+});
+
+test('semantic index validation rejects unique or non-btree substitutes', () => {
+  for (const override of [{ is_unique:true, access_method:'btree' }, { is_unique:false, access_method:'hash' }]) {
+    const result = migration.classifySnapshot(targetSnapshot({
+      indexes:[Object.assign({
+        columns:['updated_at'], is_valid:true, is_ready:true, first_desc:true, has_predicate:false
+      }, override)]
+    }));
+    assert.ok(result.mismatches.includes('index:updated-at'));
+  }
+});
+
 test('compliance is based on real definitions rather than generated object names', () => {
   const snapshot = targetSnapshot();
   snapshot.constraints = snapshot.constraints.map((item, index) => Object.assign({}, item, { name:`verified_constraint_${index}` }));
@@ -414,6 +465,62 @@ test('failed post-migration verification rolls back instead of committing', asyn
   assert.equal(queries.at(-1), 'ROLLBACK');
 });
 
+test('verification failure records sanitized mismatch details before rollback', async () => {
+  const queries = [];
+  let inspection = 0;
+  let failure;
+  try {
+    await migration.runProductionMigration({
+      client:{ query:async sql => { queries.push(sql); return { rows:[] }; } },
+      dryRun:false,
+      environment:environment({ PRODUCTION_JOURNAL_MIGRATION_CONFIRM:migration.EXECUTION_CONFIRMATION }),
+      migrationSql:'SELECT 1 AS migration_body',
+      inspectState:async () => inspection++ === 0
+        ? migration.classifySnapshot({ tableExists:false, columns:[] })
+        : migration.classifySnapshot(targetSnapshot({ policies:policies().slice(0, 3) }))
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.equal(failure.code, 'MIGRATION_VERIFICATION_FAILED');
+  assert.equal(failure.rollbackSucceeded, true);
+  assert.ok(failure.mismatches.includes('policy:daily_market_notes_delete_own'));
+  assert.deepEqual(Object.keys(failure.mismatchDetails[0]), ['item', 'expected', 'actual']);
+  assert.equal(JSON.stringify(failure.mismatchDetails).includes('auth.uid'), false);
+  assert.equal(queries.includes('COMMIT'), false);
+  assert.equal(queries.at(-1), 'ROLLBACK');
+});
+
+test('rollback failure has an independent safe classification and never reports commit', async () => {
+  const queries = [];
+  let inspection = 0;
+  let failure;
+  try {
+    await migration.runProductionMigration({
+      client:{ query:async sql => {
+        queries.push(sql);
+        if (sql === 'ROLLBACK') throw new Error('private rollback transport detail');
+        return { rows:[] };
+      } },
+      dryRun:false,
+      environment:environment({ PRODUCTION_JOURNAL_MIGRATION_CONFIRM:migration.EXECUTION_CONFIRMATION }),
+      migrationSql:'SELECT 1 AS migration_body',
+      inspectState:async () => inspection++ === 0
+        ? migration.classifySnapshot({ tableExists:false, columns:[] })
+        : migration.classifySnapshot(targetSnapshot({ relation:{ rls_enabled:true, rls_forced:false, owner:'postgres' } }))
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.equal(failure.rollbackSucceeded, false);
+  assert.equal(failure.rollbackErrorClass, 'ROLLBACK_FAILED');
+  assert.equal(queries.includes('COMMIT'), false);
+  const report = cli.safeFailureReport(failure);
+  assert.equal(report.rollback, 'failed');
+  assert.equal(report.rollbackError, 'ROLLBACK_FAILED');
+  assert.equal(JSON.stringify(report).includes('private rollback transport detail'), false);
+});
+
 test('SQL body contains final ownership, constraints, RLS, policies and least privilege grants', () => {
   const sql = migration.loadMigrationSql();
   assert.match(sql, /user_id uuid NOT NULL/i);
@@ -459,6 +566,55 @@ test('CLI sanitizes unexpected database and network errors', () => {
   const sanitized = cli.safeErrorMessage(new Error('connection failed at sensitive.internal with credential details'));
   assert.match(sanitized, /could not be confirmed/);
   assert.doesNotMatch(sanitized, /sensitive|credential/);
+});
+
+test('CLI failure report never includes secrets or full database definitions', () => {
+  const failure = Object.assign(new Error('Production Journal migration verification failed.'), {
+    code:'MIGRATION_VERIFICATION_FAILED', rollbackSucceeded:true, connectionClosed:true,
+    mismatches:['policy:daily_market_notes_select_own'],
+    mismatchDetails:[{
+      item:'policy:daily_market_notes_select_own',
+      expected:'SELECT authenticated own-user policy count=1',
+      actual:'SELECT policies=1; semanticMatches=0'
+    }],
+    secret:'postgresql://user:password@private.example/postgres',
+    definition:'USING (auth.uid() = user_id)'
+  });
+  const serialized = JSON.stringify(cli.safeFailureReport(failure));
+  assert.doesNotMatch(serialized, /password|private\.example|auth\.uid|user_id/);
+  assert.match(serialized, /semanticMatches=0/);
+  const injected = cli.safeDiagnosticText('https://private.example/?token=value', 160);
+  assert.equal(injected, '[redacted]');
+});
+
+test('resource closing records success and failure without exposing close errors', async () => {
+  let released = false;
+  const success = new Error('failure');
+  await cli.closeResources({ end:async () => {} }, { release:() => { released = true; } }, success);
+  assert.equal(released, true);
+  assert.equal(success.connectionClosed, true);
+
+  const failed = new Error('failure');
+  await cli.closeResources({ end:async () => { throw new Error('private close detail'); } }, null, failed);
+  assert.equal(failed.connectionClosed, false);
+  assert.equal(failed.connectionCloseErrorClass, 'CONNECTION_CLOSE_FAILED');
+  assert.equal(JSON.stringify(cli.safeFailureReport(failed)).includes('private close detail'), false);
+
+  const releaseFailed = new Error('failure');
+  let poolClosed = false;
+  await cli.closeResources(
+    { end:async () => { poolClosed = true; } },
+    { release:() => { throw new Error('private release detail'); } },
+    releaseFailed
+  );
+  assert.equal(poolClosed, true);
+  assert.equal(releaseFailed.connectionClosed, false);
+  assert.equal(releaseFailed.connectionCloseErrorClass, 'CONNECTION_CLOSE_FAILED');
+});
+
+test('catalog query casts policy roles to text array for node-postgres', () => {
+  const source = fs.readFileSync(path.join(root, 'scripts/lib/production-journal-migration.js'), 'utf8');
+  assert.match(source, /roles::text\[\] AS roles/);
 });
 
 test('Batch 3A does not introduce Journal runtime, UI, workflow, seed or Staging runner files', () => {

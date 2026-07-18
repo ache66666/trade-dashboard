@@ -161,6 +161,52 @@ function normalizedDefinition(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizedTextArray(value) {
+  if (Array.isArray(value)) return value.map(item => String(item));
+  const text = String(value || '').trim();
+  const identifier = '(?:[A-Za-z_][A-Za-z0-9_]*|"[A-Za-z_][A-Za-z0-9_]*")';
+  if (!new RegExp(`^\\{${identifier}(?:,${identifier})*\\}$`).test(text)) return [];
+  const body = text.slice(1, -1);
+  return body.split(',').map(item => item.replace(/^"|"$/g, ''));
+}
+
+function semanticColumns(item) {
+  return normalizedTextArray(item && item.columns);
+}
+
+function constraintColumnsReady(item, type, expectedColumns) {
+  if (!item || item.type !== type) return false;
+  const columns = semanticColumns(item);
+  if (columns.length > 0) {
+    return columns.length === expectedColumns.length && columns.every((column, index) => column === expectedColumns[index]);
+  }
+  return new RegExp(`^${type} \\(${expectedColumns.join(', ')}\\)$`, 'i').test(normalizedDefinition(item.definition));
+}
+
+function foreignKeyReady(item) {
+  if (!item || item.type !== 'FOREIGN KEY') return false;
+  const columns = semanticColumns(item);
+  const referencedColumns = normalizedTextArray(item.referenced_columns);
+  if (columns.length > 0 || referencedColumns.length > 0 || item.referenced_schema || item.referenced_table) {
+    return columns.length === 1 && columns[0] === 'user_id' &&
+      item.referenced_schema === 'auth' && item.referenced_table === 'users' &&
+      referencedColumns.length === 1 && referencedColumns[0] === 'id' && item.delete_action === 'RESTRICT';
+  }
+  return /^FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT$/i
+    .test(normalizedDefinition(item.definition));
+}
+
+function updatedAtIndexReady(item) {
+  if (!item) return false;
+  const columns = semanticColumns(item);
+  if (columns.length > 0 || Object.prototype.hasOwnProperty.call(item, 'is_valid')) {
+    return columns.length === 1 && columns[0] === 'updated_at' && item.first_desc === true &&
+      item.is_unique === false && item.access_method === 'btree' &&
+      item.is_valid === true && item.is_ready === true && item.has_predicate === false;
+  }
+  return /USING btree \(updated_at DESC\)$/i.test(normalizedDefinition(item.definition));
+}
+
 function checkConstraintReady(constraint, name) {
   if (!constraint || constraint.type !== 'CHECK') return false;
   const definition = normalizedDefinition(constraint.definition);
@@ -197,15 +243,14 @@ function sharedStructureMismatches(snapshot) {
   const mismatches = [];
   const constraints = snapshot.constraints || [];
   const indexes = snapshot.indexes || [];
-  const primaryKeys = constraints.filter(item => item.type === 'PRIMARY KEY' &&
-    /^PRIMARY KEY \(id\)$/i.test(normalizedDefinition(item.definition)));
+  const primaryKeys = constraints.filter(item => constraintColumnsReady(item, 'PRIMARY KEY', ['id']));
   if (primaryKeys.length !== 1) {
     mismatches.push('constraint:primary-key');
   }
   for (const name of REQUIRED_CHECKS) {
     if (constraints.filter(item => checkConstraintReady(item, name)).length !== 1) mismatches.push(`constraint:${name}`);
   }
-  if (!indexes.some(item => /USING btree \(updated_at DESC\)$/i.test(normalizedDefinition(item.definition)))) {
+  if (!indexes.some(updatedAtIndexReady)) {
     mismatches.push('index:updated-at');
   }
   return mismatches;
@@ -225,16 +270,17 @@ function legacyStructureMismatches(snapshot) {
 
 function policyReady(policy, command) {
   if (!policy || String(policy.cmd).toUpperCase() !== command) return false;
-  const roles = Array.isArray(policy.roles) ? policy.roles : [];
-  const using = String(policy.qual || '').replace(/[()\s]/g, '');
-  const check = String(policy.with_check || '').replace(/[()\s]/g, '');
+  const roles = normalizedTextArray(policy.roles);
+  const using = String(policy.qual || '').replace(/::[a-z_ ]+/gi, '').replace(/[()\s]/g, '').toLowerCase();
+  const check = String(policy.with_check || '').replace(/::[a-z_ ]+/gi, '').replace(/[()\s]/g, '').toLowerCase();
+  const ownsRow = value => value === 'auth.uid=user_id' || value === 'auth.uid()=user_id' ||
+    value === 'user_id=auth.uid' || value === 'user_id=auth.uid()';
   if (roles.length !== 1 || roles[0] !== 'authenticated') return false;
   if (command === 'SELECT' || command === 'DELETE') {
-    return !check && (using === 'auth.uid=user_id' || using === 'auth.uid()=user_id');
+    return !check && ownsRow(using);
   }
-  if (command === 'INSERT') return !using && (check === 'auth.uid=user_id' || check === 'auth.uid()=user_id');
-  return (using === 'auth.uid=user_id' || using === 'auth.uid()=user_id') &&
-    (check === 'auth.uid=user_id' || check === 'auth.uid()=user_id');
+  if (command === 'INSERT') return !using && ownsRow(check);
+  return ownsRow(using) && ownsRow(check);
 }
 
 function targetMismatches(snapshot) {
@@ -245,12 +291,11 @@ function targetMismatches(snapshot) {
   const sequenceGrants = snapshot.sequenceGrants || [];
   const relation = snapshot.relation || {};
   const roleAttributes = snapshot.roleAttributes || [];
-  const hasConstraint = (type, pattern) => constraints.some(item => item.type === type && pattern.test(String(item.definition)));
   const privilegeSet = (grants, role) => new Set(grants.filter(item => item.grantee === role).map(item => item.privilege));
 
-  if (!hasConstraint('UNIQUE', /^UNIQUE \(user_id, note_date\)$/i)) mismatches.push('constraint:user-date-unique');
-  if (hasConstraint('UNIQUE', /^UNIQUE \(note_date\)$/i)) mismatches.push('constraint:legacy-date-unique');
-  if (!hasConstraint('FOREIGN KEY', /^FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT$/i)) {
+  if (!constraints.some(item => constraintColumnsReady(item, 'UNIQUE', ['user_id', 'note_date']))) mismatches.push('constraint:user-date-unique');
+  if (constraints.some(item => constraintColumnsReady(item, 'UNIQUE', ['note_date']))) mismatches.push('constraint:legacy-date-unique');
+  if (!constraints.some(foreignKeyReady)) {
     mismatches.push('constraint:user-foreign-key');
   }
   if (relation.rls_enabled !== true) mismatches.push('rls:disabled');
@@ -273,10 +318,8 @@ function targetMismatches(snapshot) {
     if (policies.filter(item => policyReady(item, command)).length !== 1) mismatches.push(`policy:${name}`);
   }
   if (policies.length !== 4) mismatches.push('policy:unexpected-definition');
-  const targetUnique = constraints.filter(item => item.type === 'UNIQUE' &&
-    /^UNIQUE \(user_id, note_date\)$/i.test(normalizedDefinition(item.definition)));
-  const targetForeignKey = constraints.filter(item => item.type === 'FOREIGN KEY' &&
-    /^FOREIGN KEY \(user_id\) REFERENCES auth\.users\(id\) ON DELETE RESTRICT$/i.test(normalizedDefinition(item.definition)));
+  const targetUnique = constraints.filter(item => constraintColumnsReady(item, 'UNIQUE', ['user_id', 'note_date']));
+  const targetForeignKey = constraints.filter(foreignKeyReady);
   if (targetUnique.length !== 1 || targetForeignKey.length !== 1 || constraints.length !== 8) {
     mismatches.push('constraint:unexpected-definition');
   }
@@ -299,6 +342,48 @@ function targetMismatches(snapshot) {
     mismatches.push('grant:authenticated-sequence');
   }
   return mismatches;
+}
+
+function mismatchDetails(mismatches, snapshot) {
+  const policies = snapshot.policies || [];
+  const constraints = snapshot.constraints || [];
+  const tableGrants = snapshot.tableGrants || [];
+  const sequenceGrants = snapshot.sequenceGrants || [];
+  const relation = snapshot.relation || {};
+  return mismatches.map(item => {
+    let expected = 'required structure is compliant';
+    let actual = 'semantic match not found';
+    if (item.startsWith('policy:')) {
+      const commandByName = { select:'SELECT', insert:'INSERT', update:'UPDATE', delete:'DELETE' };
+      const key = Object.keys(commandByName).find(value => item.includes(`_${value}_`));
+      const command = commandByName[key] || 'EXPECTED';
+      expected = `${command} authenticated own-user policy count=1`;
+      actual = `${command} policies=${policies.filter(policy => String(policy.cmd).toUpperCase() === command).length}; semanticMatches=${policies.filter(policy => policyReady(policy, command)).length}`;
+    } else if (item.startsWith('constraint:')) {
+      expected = 'required constraint semantic match count=1';
+      actual = `constraints=${constraints.length}`;
+    } else if (item.startsWith('grant:')) {
+      const source = item.includes('sequence') ? sequenceGrants : tableGrants;
+      expected = 'effective privileges match least-privilege policy';
+      actual = `effectivePrivilegeRows=${source.length}`;
+    } else if (item === 'rls:disabled') {
+      expected = 'RLS enabled=true';
+      actual = `RLS enabled=${relation.rls_enabled === true}`;
+    } else if (item === 'rls:not-forced') {
+      expected = 'RLS forced=true';
+      actual = `RLS forced=${relation.rls_forced === true}`;
+    } else if (item.startsWith('column-') || item.startsWith('missing-column:') || item.startsWith('unexpected-column:')) {
+      expected = 'required column semantic definition';
+      actual = `columns=${Array.isArray(snapshot.columns) ? snapshot.columns.length : 0}`;
+    } else if (item.startsWith('index:')) {
+      expected = 'valid updated_at DESC index';
+      actual = `indexes=${Array.isArray(snapshot.indexes) ? snapshot.indexes.length : 0}`;
+    } else if (item.startsWith('data:')) {
+      expected = 'null owner rows=0';
+      actual = `nullOwnerRows=${Number.isSafeInteger(Number(snapshot.nullOwnerCount)) ? Number(snapshot.nullOwnerCount) : 'unknown'}`;
+    }
+    return { item, expected, actual };
+  });
 }
 
 function classifySnapshot(snapshot) {
@@ -330,7 +415,12 @@ function classifySnapshot(snapshot) {
   if (!Number.isSafeInteger(nullOwnerCount) || nullOwnerCount < 0) mismatches.unshift('inspection:null-owner-count');
   else if (nullOwnerCount > 0) mismatches.unshift('data:null-user-id');
   if (mismatches.length > 0) {
-    return { state:'partially-migrated', executable:false, recordCount:count, mismatches:[...new Set(mismatches)] };
+    const uniqueMismatches = [...new Set(mismatches)];
+    return {
+      state:'partially-migrated', executable:false, recordCount:count,
+      mismatches:uniqueMismatches,
+      mismatchDetails:mismatchDetails(uniqueMismatches, snapshot)
+    };
   }
   return { state:'target-compliant', executable:false, recordCount:count, mismatches:[] };
 }
@@ -366,14 +456,42 @@ async function inspectMigrationState(client) {
               WHEN 'c' THEN 'CHECK'
               ELSE con.contype::text
             END AS type,
+            ARRAY(SELECT att.attname::text
+                    FROM unnest(con.conkey) WITH ORDINALITY key(attnum, position)
+                    JOIN pg_attribute att ON att.attrelid=con.conrelid AND att.attnum=key.attnum
+                   ORDER BY key.position)::text[] AS columns,
+            ref_namespace.nspname AS referenced_schema,
+            ref_class.relname AS referenced_table,
+            ARRAY(SELECT att.attname::text
+                    FROM unnest(con.confkey) WITH ORDINALITY key(attnum, position)
+                    JOIN pg_attribute att ON att.attrelid=con.confrelid AND att.attnum=key.attnum
+                   ORDER BY key.position)::text[] AS referenced_columns,
+            CASE con.confdeltype WHEN 'r' THEN 'RESTRICT' WHEN 'a' THEN 'NO ACTION'
+                 WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE NULL END AS delete_action,
             pg_get_constraintdef(con.oid) AS definition
        FROM pg_constraint con
+       LEFT JOIN pg_class ref_class ON ref_class.oid=con.confrelid
+       LEFT JOIN pg_namespace ref_namespace ON ref_namespace.oid=ref_class.relnamespace
       WHERE con.conrelid='public.daily_market_notes'::regclass`
   );
   const indexes = await client.query(
-    `SELECT indexname AS name, indexdef AS definition
-       FROM pg_indexes
-      WHERE schemaname='public' AND tablename='daily_market_notes'`
+    `SELECT index_class.relname AS name,
+            ARRAY(SELECT att.attname::text
+                    FROM unnest(index_info.indkey) WITH ORDINALITY key(attnum, position)
+                    JOIN pg_attribute att ON att.attrelid=index_info.indrelid AND att.attnum=key.attnum
+                   ORDER BY key.position)::text[] AS columns,
+            index_info.indisunique AS is_unique, access_method.amname AS access_method,
+            index_info.indisvalid AS is_valid,
+            index_info.indisready AS is_ready,
+            COALESCE((index_info.indoption[0] & 1) = 1, false) AS first_desc,
+            index_info.indpred IS NOT NULL AS has_predicate,
+            pg_get_indexdef(index_info.indexrelid) AS definition
+       FROM pg_index index_info
+       JOIN pg_class table_class ON table_class.oid=index_info.indrelid
+       JOIN pg_namespace namespace ON namespace.oid=table_class.relnamespace
+       JOIN pg_class index_class ON index_class.oid=index_info.indexrelid
+       JOIN pg_am access_method ON access_method.oid=index_class.relam
+      WHERE namespace.nspname='public' AND table_class.relname='daily_market_notes'`
   );
   base.constraints = constraints.rows;
   base.indexes = indexes.rows;
@@ -395,7 +513,7 @@ async function inspectMigrationState(client) {
        FROM pg_roles WHERE rolname IN ('anon','authenticated')`
   );
   const policies = await client.query(
-    `SELECT policyname AS name, cmd, roles, qual, with_check
+    `SELECT policyname AS name, cmd, roles::text[] AS roles, qual, with_check
        FROM pg_policies WHERE schemaname='public' AND tablename='daily_market_notes'`
   );
   const tableGrants = await client.query(
@@ -486,12 +604,22 @@ async function runProductionMigration(options) {
     await client.query(allowTestOverrides && options.migrationSql !== undefined ? options.migrationSql : loadMigrationSql());
     const verification = await inspectState(client);
     if (verification.state !== 'target-compliant') {
-      throw new Error('Production Journal migration verification failed.');
+      const verificationError = new Error('Production Journal migration verification failed.');
+      verificationError.code = 'MIGRATION_VERIFICATION_FAILED';
+      verificationError.mismatches = verification.mismatches || [];
+      verificationError.mismatchDetails = verification.mismatchDetails || [];
+      throw verificationError;
     }
     await client.query('COMMIT');
     return { mode:'executable', status:'migrated', target, preflight, verification };
   } catch (error) {
-    try { await client.query('ROLLBACK'); } catch (rollbackError) { /* retain original error */ }
+    try {
+      await client.query('ROLLBACK');
+      error.rollbackSucceeded = true;
+    } catch (rollbackError) {
+      error.rollbackSucceeded = false;
+      error.rollbackErrorClass = 'ROLLBACK_FAILED';
+    }
     throw error;
   }
 }
@@ -508,6 +636,8 @@ module.exports = {
   inspectMigrationState,
   loadMigrationSql,
   maskedProjectRef,
+  mismatchDetails,
+  normalizedTextArray,
   runProductionMigration,
   targetMismatches
 };
