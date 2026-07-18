@@ -113,6 +113,28 @@ test('adapter skips FRED missing values and keeps the latest two valid observati
   assert.equal(record.value, 4.2);
 });
 
+test('adapter rejects duplicate or out-of-order observation dates', () => {
+  const definition = getIndicatorDefinition('US10Y');
+  for (const body of [
+    'observation_date,DGS10\n2026-07-17,4.1\n2026-07-17,4.2\n',
+    'observation_date,DGS10\n2026-07-17,4.1\n2026-07-16,4.2\n'
+  ]) {
+    assert.throws(() => adaptFredCsv({
+      seriesId:'DGS10', body, fetchedAt:NOW.toISOString()
+    }, definition), error => error.code === 'FRED_DATE_ORDER_INVALID');
+  }
+});
+
+test('adapter accepts unchanged values on distinct dates', () => {
+  const definition = getIndicatorDefinition('US10Y');
+  const record = adaptFredCsv({
+    seriesId:'DGS10', body:csv('DGS10', '4.2', '4.2'), fetchedAt:NOW.toISOString()
+  }, definition);
+  assert.equal(record.value, 4.2);
+  assert.equal(record.previous_value, 4.2);
+  assert.equal(record.change, 0);
+});
+
 test('catalog rejects unknown indicators and defines exactly three allowed symbols', () => {
   assert.deepEqual(ALLOW_LIST, ['US10Y', 'USDCNY', 'WTI']);
   assert.throws(() => getIndicatorDefinition('SPX'), error => error.code === 'CATALOG_INDICATOR_NOT_FOUND');

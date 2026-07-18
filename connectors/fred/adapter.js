@@ -26,6 +26,7 @@ function adaptFredCsv(result, definition) {
   const lines = String(result && result.body || '').split(/\n/).filter(line => line.trim() !== '');
   const header = splitCsvLine(lines.shift());
   const observations = [];
+  let previousRowDate = '';
 
   if (!result || result.seriesId !== definition.seriesId) throw adapterError('FRED_SERIES_MISMATCH');
   if (header.length < 2 || header[0] !== 'observation_date' || header[1] !== definition.seriesId) {
@@ -36,6 +37,10 @@ function adaptFredCsv(result, definition) {
     const row = splitCsvLine(line);
     if (row.length < 2) throw adapterError('FRED_ROW_INVALID');
     if (!validIsoDate(row[0])) throw adapterError('FRED_DATE_INVALID');
+    if (previousRowDate && row[0] <= previousRowDate) {
+      throw adapterError('FRED_DATE_ORDER_INVALID');
+    }
+    previousRowDate = row[0];
     if (row[1] === '' || row[1] === '.') continue;
     if (!Number.isFinite(Number(row[1]))) throw adapterError('FRED_VALUE_INVALID');
     observations.push({ date:row[0], value:convertValue(row[1], definition) });
