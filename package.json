@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
+    "data:fred:dry-run": "node --env-file=.env.production.local scripts/run-fred-connector.js --dry-run",
     "journal:migration:production:dry-run": "node scripts/migrate-production-journal.js --dry-run",
     "journal:migration:production": "node scripts/migrate-production-journal.js"
   },
