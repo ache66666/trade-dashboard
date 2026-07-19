@@ -26,11 +26,24 @@ function configuredPaths(source) {
   return paths;
 }
 
+function matchesPath(pattern, filePath) {
+  const escapedParts = pattern.split('**').map(part => part
+    .split('*')
+    .map(value => value.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^/]*'));
+  return new RegExp(`^${escapedParts.join('.*')}$`).test(filePath);
+}
+
+function triggersProductionWorkflow(filePath) {
+  return configuredPaths(workflow).some(pattern => matchesPath(pattern, filePath));
+}
+
 test('Production deployment has an explicit application path allow-list', () => {
   const paths = configuredPaths(workflow);
   assert.deepEqual(paths, [
     '.github/workflows/production.yml',
     '*.js',
+    'connectors/**',
     'public/**',
     'package.json',
     'package-lock.json',
@@ -42,12 +55,23 @@ test('Production deployment has an explicit application path allow-list', () => 
   ]);
 });
 
-test('independent automation, Connector-only, tests and documentation do not trigger application deployment', () => {
+test('Production Connector and application runtime changes trigger application deployment', () => {
+  assert.equal(triggersProductionWorkflow('connectors/fred/runner.js'), true);
+  assert.equal(triggersProductionWorkflow('connectors/fred/catalog.js'), true);
+  assert.equal(triggersProductionWorkflow('server.js'), true);
+  assert.equal(triggersProductionWorkflow('public/app.js'), true);
+});
+
+test('independent automation, schedule-only scripts, tests and documentation do not trigger application deployment', () => {
   const paths = configuredPaths(workflow);
   const joined = paths.join('\n');
-  assert.doesNotMatch(joined, /fred|connectors|run-fred|summarize-fred/i);
   assert.doesNotMatch(joined, /test|docs|README|\.github\/workflows\/\*/i);
   assert.ok(!paths.includes('.github/workflows/fred-production-sync.yml'));
+  assert.equal(triggersProductionWorkflow('.github/workflows/fred-production-sync.yml'), false);
+  assert.equal(triggersProductionWorkflow('scripts/run-fred-connector.js'), false);
+  assert.equal(triggersProductionWorkflow('scripts/summarize-fred-workflow.js'), false);
+  assert.equal(triggersProductionWorkflow('test/fred-connector.test.js'), false);
+  assert.equal(triggersProductionWorkflow('docs/data/FRED_CONNECTOR_MVP.md'), false);
 });
 
 test('Render deployment hook and Production secret remain unchanged', () => {

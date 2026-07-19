@@ -66,6 +66,6 @@ test('normalized hashing is stable across LF, CRLF and CR line endings', () => {
   assert.equal(normalizedSha256(lf), normalizedSha256(cr));
 });
 
-test('later Runtime batches leave the Production workflow content unchanged', () => {
-  assert.equal(sha256('.github/workflows/production.yml'), 'e1e7b09e0d19f8ec9f290029e98080a3d39c29bd71970b5f8314d02acbfaba4b');
+test('later Runtime batches leave the approved Production workflow path policy unchanged', () => {
+  assert.equal(sha256('.github/workflows/production.yml'), '0e33e7a5816cc9129669ed40d6b6eef7e597f420d5214d8d0f45411f27cc8b65');
 });
