@@ -45,9 +45,9 @@ test('workflow does not configure retries and includes tests plus syntax checks'
 });
 
 test('API baseline, count and non-target checks occur before and after the single apply', () => {
-  const baseline = RUNNER.indexOf('const beforeRows = await readPublicIndicators');
-  const apply = RUNNER.indexOf('await repository.apply(plans)');
-  const readback = RUNNER.indexOf('await verifyReadback');
+  const baseline = RUNNER.indexOf('readPublicIndicators(options.environment');
+  const apply = RUNNER.indexOf('repository.apply(plans)');
+  const readback = RUNNER.indexOf('verifyReadback(options.environment');
   assert.ok(baseline >= 0 && apply > baseline && readback > apply);
   assert.match(RUNNER, /EXPECTED_INDICATOR_COUNT = 32/);
   assert.match(RUNNER, /READBACK_NON_TARGET_CHANGED/);
