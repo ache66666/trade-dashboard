@@ -70,7 +70,7 @@ function publicRows() {
   const targets = ALLOW_LIST.map((symbol, index) => Object.assign({
     id:index + 1, name:symbol, value_unit:getIndicatorDefinition(symbol).databaseUnit,
     is_featured:true, sort_order:index + 1, updated_at:'2026-07-17T00:00:00Z'
-  }, currentRow(symbol)));
+  }, currentRow(symbol), { source:getIndicatorDefinition(symbol).source }));
   const others = Array.from({ length:29 }, (value, index) => ({
     id:index + 4, symbol:`OTHER${index + 1}`, name:`Other ${index + 1}`,
     category:'Other', value:index, previous_value:index - 1, value_unit:'',
@@ -292,6 +292,123 @@ test('public readback requires 32 unique indicator codes', async () => {
     error => error.code === 'READBACK_INDICATOR_SET_INVALID');
 });
 
+function fastReadbackOptions() {
+  return { attemptTimeoutMs:5, totalTimeoutMs:100, retryDelaysMs:[0, 0], sleep:async () => {} };
+}
+
+function timeoutRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), {
+      name:'AbortError'
+    })));
+  });
+}
+
+test('Production readback retries one timeout and succeeds on the second attempt', async () => {
+  let calls = 0;
+  const rows = await readPublicIndicators({}, async (url, request) => {
+    calls += 1;
+    return calls === 1 ? timeoutRequest(request) : response(JSON.stringify(publicRows()));
+  }, Object.assign(fastReadbackOptions(), { requiredSymbols:['US10Y'] }));
+  assert.equal(calls, 2);
+  assert.equal(rows.length, 32);
+});
+
+test('Production readback stops safely after three consecutive timeouts', async () => {
+  let calls = 0;
+  await assert.rejects(readPublicIndicators({}, async (url, request) => {
+    calls += 1;
+    return timeoutRequest(request);
+  }, fastReadbackOptions()), error => error.code === 'READBACK_TIMEOUT');
+  assert.equal(calls, 3);
+});
+
+test('Production readback retries a connection error and distinguishes response failures', async () => {
+  let calls = 0;
+  const rows = await readPublicIndicators({}, async () => {
+    calls += 1;
+    if (calls === 1) throw new TypeError('temporary connection error');
+    return response(JSON.stringify(publicRows()));
+  }, Object.assign(fastReadbackOptions(), { requiredSymbols:['US10Y'] }));
+  assert.equal(calls, 2);
+  assert.equal(rows.length, 32);
+
+  await assert.rejects(readPublicIndicators({}, async () => response('unavailable', { ok:false, status:500 }),
+    fastReadbackOptions()), error => error.code === 'READBACK_HTTP_ERROR');
+  await assert.rejects(readPublicIndicators({}, async () => response('', { status:204 }),
+    fastReadbackOptions()), error => error.code === 'READBACK_HTTP_ERROR');
+  await assert.rejects(readPublicIndicators({}, async () => response('not-json'), fastReadbackOptions()),
+    error => error.code === 'READBACK_JSON_INVALID');
+});
+
+async function assertPreflightBlocks(apiResponse, expectedCode) {
+  let applied = 0;
+  let apiCalls = 0;
+  await assert.rejects(runFredConnector({
+    repository:{
+      readCurrent:async () => [currentRow('US10Y')],
+      apply:async () => { applied += 1; return { updated:1 }; }
+    },
+    dryRun:false,
+    symbols:['US10Y'],
+    environment:{},
+    readbackOptions:fastReadbackOptions(),
+    now:() => NOW,
+    fetchImplementation:async (url, request) => {
+      if (url.endsWith('/api/indicators')) {
+        apiCalls += 1;
+        return typeof apiResponse === 'function' ? apiResponse(request) : apiResponse;
+      }
+      return response(csv('DGS10'));
+    }
+  }), error => error.code === expectedCode);
+  assert.equal(applied, 0);
+  return apiCalls;
+}
+
+test('HTTP and invalid JSON preflight failures never call repository.apply', async () => {
+  assert.equal(await assertPreflightBlocks(response('unavailable', { ok:false, status:500 }),
+    'READBACK_HTTP_ERROR'), 1);
+  assert.equal(await assertPreflightBlocks(response('not-json'), 'READBACK_JSON_INVALID'), 1);
+});
+
+test('indicator count, duplicate symbols and missing US10Y never call repository.apply', async () => {
+  assert.equal(await assertPreflightBlocks(response(JSON.stringify(publicRows().slice(0, 31))),
+    'READBACK_INDICATOR_SET_INVALID'), 1);
+  const duplicate = publicRows();
+  duplicate[31] = Object.assign({}, duplicate[31], { symbol:duplicate[30].symbol });
+  assert.equal(await assertPreflightBlocks(response(JSON.stringify(duplicate)),
+    'READBACK_INDICATOR_SET_INVALID'), 1);
+  const missing = publicRows().map(row => row.symbol === 'US10Y' ? Object.assign({}, row, {
+    symbol:'MISSING_US10Y'
+  }) : row);
+  assert.equal(await assertPreflightBlocks(response(JSON.stringify(missing)),
+    'READBACK_BASELINE_MISMATCH'), 1);
+});
+
+test('an inconsistent US10Y baseline never calls repository.apply', async () => {
+  const inconsistent = publicRows().map(row => row.symbol === 'US10Y' ? Object.assign({}, row, {
+    source:'unexpected source'
+  }) : row);
+  assert.equal(await assertPreflightBlocks(response(JSON.stringify(inconsistent)),
+    'READBACK_BASELINE_MISMATCH'), 1);
+  const wrongUnit = publicRows().map(row => row.symbol === 'US10Y' ? Object.assign({}, row, {
+    value_unit:'bp'
+  }) : row);
+  assert.equal(await assertPreflightBlocks(response(JSON.stringify(wrongUnit)),
+    'READBACK_BASELINE_MISMATCH'), 1);
+});
+
+test('three preflight timeouts never call repository.apply', async () => {
+  assert.equal(await assertPreflightBlocks(request => timeoutRequest(request), 'READBACK_TIMEOUT'), 3);
+});
+
+test('three preflight connection errors never call repository.apply', async () => {
+  assert.equal(await assertPreflightBlocks(() => {
+    throw new TypeError('temporary connection error');
+  }, 'READBACK_CONNECTION_ERROR'), 3);
+});
+
 test('apply preflight and readback verify targets and all 29 non-target rows', async () => {
   const baseline = publicRows();
   const rows = ALLOW_LIST.map(currentRow);
@@ -334,7 +451,7 @@ test('readback rejects a change to any non-target indicator', async () => {
     return { symbol, to:{ observation_date:row.as_of, value:row.value, previous_value:row.previous_value } };
   });
   await assert.rejects(verifyReadback({}, plans,
-    async () => response(JSON.stringify(after)), before),
+    async () => response(JSON.stringify(after)), before, fastReadbackOptions()),
   error => error.code === 'READBACK_NON_TARGET_CHANGED');
 });
 
