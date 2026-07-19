@@ -9,8 +9,9 @@ const { fetchFredCsv } = require('../connectors/fred/fetcher');
 const { assertProductionSafety } = require('../connectors/fred/production-safety');
 const { IndicatorRepository } = require('../connectors/fred/repository');
 const {
-  readPublicIndicators, runFredConnector, safeErrorCode, verifyReadback
+  readPublicIndicators, runFredConnector, safeErrorCode, selectedSymbols, verifyReadback
 } = require('../connectors/fred/runner');
+const { parseArguments } = require('../scripts/run-fred-connector');
 const { validateRecord } = require('../connectors/fred/validator');
 
 const NOW = new Date('2026-07-18T12:00:00Z');
@@ -204,6 +205,35 @@ test('runner dry-run fetches and validates without writing', async () => {
   assert.equal(result.mode, 'dry-run');
   assert.equal(result.plans.length, 3);
   assert.equal(applied, false);
+});
+
+test('single-indicator mode processes only US10Y without changing the scheduled default', async () => {
+  assert.deepEqual(parseArguments(['--dry-run', '--indicator=US10Y']).symbols, ['US10Y']);
+  assert.deepEqual(parseArguments(['--dry-run']).symbols, ALLOW_LIST);
+  assert.throws(() => parseArguments(['--dry-run', '--indicator=']), /Invalid FRED connector indicator/);
+  assert.throws(() => parseArguments(['--dry-run', '--indicator=SPX']), /Invalid FRED connector indicator/);
+  assert.throws(() => selectedSymbols(['US10Y', 'US10Y']), error =>
+    error.code === 'FRED_INDICATOR_SELECTION_INVALID');
+
+  const reads = [];
+  const fetched = [];
+  const result = await runFredConnector({
+    repository:{
+      readCurrent:async symbols => { reads.push(symbols); return [currentRow('US10Y')]; },
+      apply:async () => { throw new Error('dry-run must not apply'); }
+    },
+    dryRun:true,
+    symbols:['US10Y'],
+    now:() => NOW,
+    fetchImplementation:async url => {
+      fetched.push(new URL(url).searchParams.get('id'));
+      return response(csv('DGS10'));
+    }
+  });
+
+  assert.deepEqual(reads, [['US10Y']]);
+  assert.deepEqual(fetched, ['DGS10']);
+  assert.deepEqual(result.plans.map(plan => plan.symbol), ['US10Y']);
 });
 
 test('Production safety fails closed for environment, target and allow-list errors', () => {

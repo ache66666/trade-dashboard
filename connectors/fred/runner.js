@@ -41,6 +41,15 @@ function connectorFailure(code) {
   return Object.assign(new Error(code), { code });
 }
 
+function selectedSymbols(value) {
+  const symbols = value === undefined ? ALLOW_LIST : value;
+  if (!Array.isArray(symbols) || symbols.length === 0 ||
+      new Set(symbols).size !== symbols.length || symbols.some(symbol => !ALLOW_LIST.includes(symbol))) {
+    throw connectorFailure('FRED_INDICATOR_SELECTION_INVALID');
+  }
+  return symbols;
+}
+
 function normalizedPublicRow(row) {
   const normalized = {};
   for (const field of PUBLIC_ROW_FIELDS) normalized[field] = row && row[field];
@@ -102,12 +111,13 @@ async function runFredConnector(options) {
   const now = options.now || (() => new Date());
   const dryRun = options.dryRun !== false;
   const logger = options.logger || { info:() => {}, error:() => {} };
-  const currentRows = await repository.readCurrent(ALLOW_LIST);
+  const symbols = selectedSymbols(options.symbols);
+  const currentRows = await repository.readCurrent(symbols);
   const currentBySymbol = new Map(currentRows.map(row => [row.symbol, row]));
   const plans = [];
 
   try {
-    for (const symbol of ALLOW_LIST) {
+    for (const symbol of symbols) {
       const definition = getIndicatorDefinition(symbol);
       const fetched = await fetchFredCsv(definition.seriesId, { fetchImplementation, now });
       const record = adaptFredCsv(fetched, definition);
@@ -137,5 +147,6 @@ module.exports = {
   readPublicIndicators,
   runFredConnector,
   safeErrorCode,
+  selectedSymbols,
   verifyReadback
 };

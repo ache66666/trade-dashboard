@@ -1,18 +1,26 @@
 'use strict';
 
+const { ALLOW_LIST } = require('../connectors/fred/catalog');
 const { assertProductionSafety, WRITE_CONFIRMATION } = require('../connectors/fred/production-safety');
 
 function parseArguments(argumentsList) {
   const apply = argumentsList.includes('--apply');
   const dryRunFlag = argumentsList.includes('--dry-run');
   const confirmations = argumentsList.filter(value => value.startsWith('--confirm='));
-  const known = argumentsList.every(value => value === '--apply' || value === '--dry-run' || value.startsWith('--confirm='));
-  if (!known || (apply && dryRunFlag) || confirmations.length > 1) {
+  const indicators = argumentsList.filter(value => value.startsWith('--indicator='));
+  const known = argumentsList.every(value => value === '--apply' || value === '--dry-run' ||
+    value.startsWith('--confirm=') || value.startsWith('--indicator='));
+  if (!known || (apply && dryRunFlag) || confirmations.length > 1 || indicators.length > 1) {
     throw new Error('Invalid FRED connector options.');
+  }
+  const indicator = indicators.length ? indicators[0].slice('--indicator='.length).trim().toUpperCase() : '';
+  if (indicators.length && !ALLOW_LIST.includes(indicator)) {
+    throw new Error('Invalid FRED connector indicator.');
   }
   return {
     dryRun:!apply,
-    confirmation:confirmations.length ? confirmations[0].slice('--confirm='.length) : ''
+    confirmation:confirmations.length ? confirmations[0].slice('--confirm='.length) : '',
+    symbols:indicator ? [indicator] : ALLOW_LIST
   };
 }
 
@@ -52,7 +60,8 @@ async function main() {
       repository:new IndicatorRepository(pool, require('../connectors/fred/catalog').ALLOW_LIST),
       dryRun:options.dryRun,
       environment:process.env,
-      logger
+      logger,
+      symbols:options.symbols
     });
     process.stdout.write(`${JSON.stringify(safeReport(target, result), null, 2)}\n`);
   } finally {
