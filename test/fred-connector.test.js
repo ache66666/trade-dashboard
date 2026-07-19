@@ -9,9 +9,10 @@ const { fetchFredCsv } = require('../connectors/fred/fetcher');
 const { assertProductionSafety } = require('../connectors/fred/production-safety');
 const { IndicatorRepository } = require('../connectors/fred/repository');
 const {
-  readPublicIndicators, runFredConnector, safeErrorCode, selectedSymbols, verifyReadback
+  readPublicIndicators, runFredConnector, safeErrorCode, safeStage, selectedSymbols,
+  stageFailure, verifyReadback
 } = require('../connectors/fred/runner');
-const { parseArguments } = require('../scripts/run-fred-connector');
+const { parseArguments, safeFailure } = require('../scripts/run-fred-connector');
 const { validateRecord } = require('../connectors/fred/validator');
 
 const NOW = new Date('2026-07-18T12:00:00Z');
@@ -490,4 +491,60 @@ test('repository rolls back all updates and preserves old values after a failure
 test('safe logging exposes only allow-listed error codes', () => {
   assert.equal(safeErrorCode({ code:'FRED_HTTP_ERROR', message:'secret' }), 'FRED_HTTP_ERROR');
   assert.equal(safeErrorCode({ code:'token=https://secret.example' }), 'FRED_CONNECTOR_FAILED');
+});
+
+test('CLI failure output keeps one public code and exposes only an allow-listed stage', () => {
+  const failure = stageFailure(Object.assign(new Error('password=secret'), {
+    code:'DATABASE_SECRET_DETAIL'
+  }), 'repository-init');
+  assert.deepEqual(safeFailure(failure), {
+    error:'FRED_CONNECTOR_FAILED',
+    stage:'repository-init',
+    message:'FRED connector stopped without changing unconfirmed data.'
+  });
+  assert.equal(JSON.stringify(safeFailure(failure)).includes('secret'), false);
+  assert.equal(safeStage({ fredStage:'token=https://secret.example' }), 'unknown');
+});
+
+test('runner classifies failures before and inside repository.apply without leaking details', async () => {
+  await assert.rejects(runFredConnector({
+    repository:{ readCurrent:async () => { throw new Error('database target detail'); } },
+    dryRun:false, symbols:['US10Y']
+  }), error => safeStage(error) === 'repository-init');
+
+  await assert.rejects(runFredConnector({
+    repository:{
+      readCurrent:async () => [currentRow('US10Y')],
+      apply:async () => { throw new Error('SQL statement detail'); }
+    },
+    dryRun:false,
+    symbols:['US10Y'],
+    environment:{},
+    now:() => NOW,
+    readbackOptions:fastReadbackOptions(),
+    fetchImplementation:async url => url.endsWith('/api/indicators')
+      ? response(JSON.stringify(publicRows())) : response(csv('DGS10'))
+  }), error => safeStage(error) === 'repository-apply');
+});
+
+test('runner classifies fetch, transform, validation and readback failures safely', async () => {
+  const repository = { readCurrent:async () => [currentRow('US10Y')], apply:async () => ({ updated:0 }) };
+  await assert.rejects(runFredConnector({
+    repository, dryRun:true, symbols:['US10Y'], now:() => NOW,
+    fetchImplementation:async () => { throw new TypeError('private host detail'); }
+  }), error => safeStage(error) === 'fetch');
+  await assert.rejects(runFredConnector({
+    repository, dryRun:true, symbols:['US10Y'], now:() => NOW,
+    fetchImplementation:async () => response('not,csv')
+  }), error => safeStage(error) === 'transform');
+  await assert.rejects(runFredConnector({
+    repository, dryRun:true, symbols:['US10Y'], now:() => NOW,
+    fetchImplementation:async () => response(csv('DGS10', '4.20', '999'))
+  }), error => safeStage(error) === 'validation');
+  await assert.rejects(runFredConnector({
+    repository, dryRun:false, symbols:['US10Y'], environment:{}, now:() => NOW,
+    readbackOptions:fastReadbackOptions(),
+    fetchImplementation:async url => url.endsWith('/api/indicators')
+      ? response('unavailable', { ok:false, status:500 }) : response(csv('DGS10'))
+  }), error => safeStage(error) === 'readback');
 });

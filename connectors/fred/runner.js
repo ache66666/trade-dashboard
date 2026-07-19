@@ -16,10 +16,36 @@ const PUBLIC_ROW_FIELDS = Object.freeze([
   'change_type', 'source', 'as_of', 'frequency', 'is_manual', 'is_featured',
   'sort_order', 'updated_at'
 ]);
+const SAFE_STAGES = Object.freeze([
+  'environment-validation', 'fetch', 'transform', 'validation',
+  'repository-init', 'repository-apply', 'readback'
+]);
 
 function safeErrorCode(error) {
   return /^[A-Z0-9_]{3,80}$/.test(String(error && error.code || ''))
     ? error.code : 'FRED_CONNECTOR_FAILED';
+}
+
+function safeStage(error) {
+  return SAFE_STAGES.includes(error && error.fredStage) ? error.fredStage : 'unknown';
+}
+
+function stageFailure(error, stage) {
+  const failure = error instanceof Error ? error : new Error('FRED connector stage failed.');
+  if (SAFE_STAGES.includes(stage) && safeStage(failure) === 'unknown') {
+    Object.defineProperty(failure, 'fredStage', {
+      configurable:true, enumerable:false, value:stage, writable:false
+    });
+  }
+  return failure;
+}
+
+async function atStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    throw stageFailure(error, stage);
+  }
 }
 
 function publicPlan(plan) {
@@ -186,21 +212,23 @@ async function runFredConnector(options) {
   const dryRun = options.dryRun !== false;
   const logger = options.logger || { info:() => {}, error:() => {} };
   const symbols = selectedSymbols(options.symbols);
-  const currentRows = await repository.readCurrent(symbols);
+  const currentRows = await atStage('repository-init', () => repository.readCurrent(symbols));
   const currentBySymbol = new Map(currentRows.map(row => [row.symbol, row]));
   const plans = [];
 
   try {
     for (const symbol of symbols) {
       const definition = getIndicatorDefinition(symbol);
-      const fetched = await fetchFredCsv(definition.seriesId, { fetchImplementation, now });
-      const record = adaptFredCsv(fetched, definition);
-      const plan = validateRecord(record, definition, currentBySymbol.get(symbol), { now });
+      const fetched = await atStage('fetch', () =>
+        fetchFredCsv(definition.seriesId, { fetchImplementation, now }));
+      const record = await atStage('transform', () => adaptFredCsv(fetched, definition));
+      const plan = await atStage('validation', () =>
+        validateRecord(record, definition, currentBySymbol.get(symbol), { now }));
       plans.push(plan);
       logger.info(`[DATA][FRED] ${symbol} ${plan.action}`);
     }
   } catch (error) {
-    logger.error(`[DATA][FRED] ${safeErrorCode(error)}`);
+    logger.error(`[DATA][FRED] stage=${safeStage(error)} code=${safeErrorCode(error)}`);
     throw error;
   }
 
@@ -208,11 +236,13 @@ async function runFredConnector(options) {
     return { mode:'dry-run', updated:0, plans:plans.map(publicPlan) };
   }
 
-  const beforeRows = await readPublicIndicators(options.environment, fetchImplementation,
-    Object.assign({}, options.readbackOptions, { requiredSymbols:symbols }));
-  const result = await repository.apply(plans);
-  const readback = await verifyReadback(options.environment, plans, fetchImplementation, beforeRows,
-    options.readbackOptions);
+  const beforeRows = await atStage('readback', () =>
+    readPublicIndicators(options.environment, fetchImplementation,
+      Object.assign({}, options.readbackOptions, { requiredSymbols:symbols })));
+  const result = await atStage('repository-apply', () => repository.apply(plans));
+  const readback = await atStage('readback', () =>
+    verifyReadback(options.environment, plans, fetchImplementation, beforeRows,
+      options.readbackOptions));
   return { mode:'apply', updated:result.updated, readback, plans:plans.map(publicPlan) };
 }
 
@@ -224,7 +254,9 @@ module.exports = {
   readPublicIndicators,
   runFredConnector,
   safeErrorCode,
+  safeStage,
   selectedSymbols,
+  stageFailure,
   validatePublicRows,
   verifyReadback
 };

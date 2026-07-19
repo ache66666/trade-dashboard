@@ -2,6 +2,7 @@
 
 const { ALLOW_LIST } = require('../connectors/fred/catalog');
 const { assertProductionSafety, WRITE_CONFIRMATION } = require('../connectors/fred/production-safety');
+const { safeStage, stageFailure } = require('../connectors/fred/runner');
 
 function parseArguments(argumentsList) {
   const apply = argumentsList.includes('--apply');
@@ -39,25 +40,41 @@ function safeReport(target, result) {
 }
 
 function safeFailure(error) {
-  const code = /^[A-Z0-9_]{3,80}$/.test(String(error && error.code || ''))
-    ? error.code : 'FRED_CONNECTOR_FAILED';
-  return { error:code, message:'FRED connector stopped without changing unconfirmed data.' };
+  return {
+    error:'FRED_CONNECTOR_FAILED',
+    stage:safeStage(error),
+    message:'FRED connector stopped without changing unconfirmed data.'
+  };
 }
 
 async function main() {
-  const options = parseArguments(process.argv.slice(2));
-  const target = assertProductionSafety(process.env, {
-    writeRequested:!options.dryRun,
-    confirmation:options.confirmation
-  });
-  const { getPool, closePool } = require('../database');
-  const logger = require('../logger');
-  const { IndicatorRepository } = require('../connectors/fred/repository');
-  const { runFredConnector } = require('../connectors/fred/runner');
-  const pool = getPool();
+  let options;
+  let target;
   try {
-    const result = await runFredConnector({
-      repository:new IndicatorRepository(pool, require('../connectors/fred/catalog').ALLOW_LIST),
+    options = parseArguments(process.argv.slice(2));
+    target = assertProductionSafety(process.env, {
+      writeRequested:!options.dryRun,
+      confirmation:options.confirmation
+    });
+  } catch (error) {
+    throw stageFailure(error, 'environment-validation');
+  }
+
+  let closePool;
+  let logger;
+  let repository;
+  try {
+    const database = require('../database');
+    const { IndicatorRepository } = require('../connectors/fred/repository');
+    closePool = database.closePool;
+    logger = require('../logger');
+    repository = new IndicatorRepository(database.getPool(), ALLOW_LIST);
+  } catch (error) {
+    throw stageFailure(error, 'repository-init');
+  }
+  try {
+    const result = await require('../connectors/fred/runner').runFredConnector({
+      repository,
       dryRun:options.dryRun,
       environment:process.env,
       logger,
