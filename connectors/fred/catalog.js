@@ -1,6 +1,19 @@
 'use strict';
 
 const INDICATORS = Object.freeze({
+  US2Y:Object.freeze({
+    indicatorCode:'US2Y',
+    category:'利率',
+    seriesId:'DGS2',
+    source:'FRED · DGS2',
+    unit:'%',
+    databaseUnit:'%',
+    frequency:'Daily Close',
+    changeType:'bp',
+    minimum:-5,
+    maximum:30,
+    scale:1
+  }),
   US10Y:Object.freeze({
     indicatorCode:'US10Y',
     category:'利率',
@@ -43,6 +56,7 @@ const INDICATORS = Object.freeze({
 });
 
 const ALLOW_LIST = Object.freeze(Object.keys(INDICATORS));
+const DEFAULT_SYMBOLS = Object.freeze(['US10Y', 'USDCNY', 'WTI']);
 
 function getIndicatorDefinition(indicatorCode) {
   const definition = INDICATORS[String(indicatorCode || '').trim().toUpperCase()];
@@ -54,4 +68,4 @@ function getIndicatorDefinition(indicatorCode) {
   return definition;
 }
 
-module.exports = { ALLOW_LIST, INDICATORS, getIndicatorDefinition };
+module.exports = { ALLOW_LIST, DEFAULT_SYMBOLS, INDICATORS, getIndicatorDefinition };

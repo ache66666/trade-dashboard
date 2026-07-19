@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { ALLOW_LIST } = require('../connectors/fred/catalog');
+const { DEFAULT_SYMBOLS } = require('../connectors/fred/catalog');
 const { markdownSummary, parseReport } = require('../scripts/summarize-fred-run');
 
 const ROOT = path.join(__dirname, '..');
@@ -19,7 +19,7 @@ test('FRED Production workflow has weekday schedule, manual trigger and non-canc
 });
 
 test('workflow runs only the three-indicator connector behind dry-run and apply gates', () => {
-  assert.deepEqual(ALLOW_LIST, ['US10Y', 'USDCNY', 'WTI']);
+  assert.deepEqual(DEFAULT_SYMBOLS, ['US10Y', 'USDCNY', 'WTI']);
   const dryRun = WORKFLOW.indexOf('scripts/run-fred-connector.js --dry-run');
   const apply = WORKFLOW.indexOf('scripts/run-fred-connector.js --apply');
   assert.ok(dryRun >= 0 && apply > dryRun);

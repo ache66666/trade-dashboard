@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { adaptFredCsv, convertValue } = require('../connectors/fred/adapter');
-const { ALLOW_LIST, getIndicatorDefinition } = require('../connectors/fred/catalog');
+const { ALLOW_LIST, DEFAULT_SYMBOLS, getIndicatorDefinition } = require('../connectors/fred/catalog');
 const { fetchFredCsv } = require('../connectors/fred/fetcher');
 const { assertProductionSafety } = require('../connectors/fred/production-safety');
 const { IndicatorRepository } = require('../connectors/fred/repository');
@@ -68,7 +68,7 @@ function assertSafety(environment, options = {}) {
 }
 
 function publicRows() {
-  const targets = ALLOW_LIST.map((symbol, index) => Object.assign({
+  const targets = DEFAULT_SYMBOLS.map((symbol, index) => Object.assign({
     id:index + 1, name:symbol, value_unit:getIndicatorDefinition(symbol).databaseUnit,
     is_featured:true, sort_order:index + 1, updated_at:'2026-07-17T00:00:00Z'
   }, currentRow(symbol), { source:getIndicatorDefinition(symbol).source }));
@@ -165,8 +165,14 @@ test('adapter accepts unchanged values on distinct dates', () => {
   assert.equal(record.change, 0);
 });
 
-test('catalog rejects unknown indicators and defines exactly three allowed symbols', () => {
-  assert.deepEqual(ALLOW_LIST, ['US10Y', 'USDCNY', 'WTI']);
+test('catalog adds only US2Y while preserving the three-indicator scheduled default', () => {
+  assert.deepEqual(ALLOW_LIST, ['US2Y', 'US10Y', 'USDCNY', 'WTI']);
+  assert.deepEqual(DEFAULT_SYMBOLS, ['US10Y', 'USDCNY', 'WTI']);
+  assert.deepEqual(getIndicatorDefinition('US2Y'), {
+    indicatorCode:'US2Y', category:'利率', seriesId:'DGS2', source:'FRED · DGS2',
+    unit:'%', databaseUnit:'%', frequency:'Daily Close', changeType:'bp',
+    minimum:-5, maximum:30, scale:1
+  });
   assert.throws(() => getIndicatorDefinition('SPX'), error => error.code === 'CATALOG_INDICATOR_NOT_FOUND');
 });
 
@@ -193,7 +199,7 @@ test('validator rejects unit mismatch and observation regression', () => {
 
 test('runner dry-run fetches and validates without writing', async () => {
   let applied = false;
-  const rows = ALLOW_LIST.map(currentRow);
+  const rows = DEFAULT_SYMBOLS.map(currentRow);
   const result = await runFredConnector({
     repository:{ readCurrent:async () => rows, apply:async () => { applied = true; } },
     dryRun:true,
@@ -208,9 +214,10 @@ test('runner dry-run fetches and validates without writing', async () => {
   assert.equal(applied, false);
 });
 
-test('single-indicator mode processes only US10Y without changing the scheduled default', async () => {
+test('single-indicator mode processes only US2Y without changing the scheduled default', async () => {
+  assert.deepEqual(parseArguments(['--dry-run', '--indicator=US2Y']).symbols, ['US2Y']);
   assert.deepEqual(parseArguments(['--dry-run', '--indicator=US10Y']).symbols, ['US10Y']);
-  assert.deepEqual(parseArguments(['--dry-run']).symbols, ALLOW_LIST);
+  assert.deepEqual(parseArguments(['--dry-run']).symbols, DEFAULT_SYMBOLS);
   assert.throws(() => parseArguments(['--dry-run', '--indicator=']), /Invalid FRED connector indicator/);
   assert.throws(() => parseArguments(['--dry-run', '--indicator=SPX']), /Invalid FRED connector indicator/);
   assert.throws(() => selectedSymbols(['US10Y', 'US10Y']), error =>
@@ -235,6 +242,25 @@ test('single-indicator mode processes only US10Y without changing the scheduled 
   assert.deepEqual(reads, [['US10Y']]);
   assert.deepEqual(fetched, ['DGS10']);
   assert.deepEqual(result.plans.map(plan => plan.symbol), ['US10Y']);
+
+  const us2y = await runFredConnector({
+    repository:{
+      readCurrent:async symbols => {
+        assert.deepEqual(symbols, ['US2Y']);
+        return [currentRow('US2Y')];
+      },
+      apply:async () => { throw new Error('dry-run must not apply'); }
+    },
+    dryRun:true,
+    symbols:['US2Y'],
+    now:() => NOW,
+    fetchImplementation:async url => {
+      assert.equal(new URL(url).searchParams.get('id'), 'DGS2');
+      return response(csv('DGS2'));
+    }
+  });
+  assert.deepEqual(us2y.plans.map(plan => plan.symbol), ['US2Y']);
+  assert.equal(us2y.plans[0].to.source, 'FRED · DGS2');
 });
 
 test('Production safety fails closed for environment, target and allow-list errors', () => {
@@ -347,7 +373,7 @@ async function assertPreflightBlocks(apiResponse, expectedCode) {
   let apiCalls = 0;
   await assert.rejects(runFredConnector({
     repository:{
-      readCurrent:async () => [currentRow('US10Y')],
+      readCurrent:async () => [publicRows().find(row => row.symbol === 'US10Y')],
       apply:async () => { applied += 1; return { updated:1 }; }
     },
     dryRun:false,
@@ -412,7 +438,7 @@ test('three preflight connection errors never call repository.apply', async () =
 
 test('apply preflight and readback verify targets and all 29 non-target rows', async () => {
   const baseline = publicRows();
-  const rows = ALLOW_LIST.map(currentRow);
+  const rows = DEFAULT_SYMBOLS.map(symbol => baseline.find(row => row.symbol === symbol));
   let applied = 0;
   let apiReads = 0;
   const result = await runFredConnector({
@@ -427,7 +453,7 @@ test('apply preflight and readback verify targets and all 29 non-target rows', a
       if (url.endsWith('/api/indicators')) {
         apiReads += 1;
         const snapshot = baseline.map(row => {
-          const definition = ALLOW_LIST.includes(row.symbol) ? getIndicatorDefinition(row.symbol) : null;
+          const definition = DEFAULT_SYMBOLS.includes(row.symbol) ? getIndicatorDefinition(row.symbol) : null;
           return definition && apiReads === 2 ? Object.assign({}, row, {
             value:4.25, previous_value:4.20, as_of:'2026-07-17',
             source:definition.source, frequency:definition.frequency, is_manual:false
@@ -444,19 +470,70 @@ test('apply preflight and readback verify targets and all 29 non-target rows', a
   assert.deepEqual(result.readback, { verified:3, indicatorCount:32, nonTargetVerified:29 });
 });
 
+test('US2Y first apply accepts an exact non-FRED baseline and verifies the FRED result', async () => {
+  const definition = getIndicatorDefinition('US2Y');
+  const current = Object.assign(currentRow('US2Y'), {
+    source:'U.S. Treasury', frequency:'Daily', is_manual:false
+  });
+  const baseline = publicRows().map(row => row.symbol === 'OTHER1' ? Object.assign({}, current, {
+    id:row.id, name:'美国国债 2Y', sort_order:row.sort_order, updated_at:row.updated_at
+  }) : row);
+  let apiReads = 0;
+  let applied = 0;
+  const result = await runFredConnector({
+    repository:{
+      readCurrent:async symbols => {
+        assert.deepEqual(symbols, ['US2Y']);
+        return [current];
+      },
+      apply:async plans => {
+        applied += 1;
+        assert.deepEqual(plans.map(plan => plan.symbol), ['US2Y']);
+        return { updated:1 };
+      }
+    },
+    dryRun:false,
+    symbols:['US2Y'],
+    environment:{},
+    now:() => NOW,
+    fetchImplementation:async url => {
+      if (url.endsWith('/api/indicators')) {
+        apiReads += 1;
+        return response(JSON.stringify(apiReads === 1 ? baseline : baseline.map(row =>
+          row.symbol === 'US2Y' ? Object.assign({}, row, {
+            value:4.25, previous_value:4.20, as_of:'2026-07-17',
+            source:definition.source, frequency:definition.frequency, is_manual:false
+          }) : row)));
+      }
+      assert.equal(new URL(url).searchParams.get('id'), 'DGS2');
+      return response(csv('DGS2'));
+    }
+  });
+  assert.equal(applied, 1);
+  assert.equal(apiReads, 2);
+  assert.deepEqual(result.readback, { verified:1, indicatorCount:32, nonTargetVerified:31 });
+});
+
 test('readback rejects a change to any non-target indicator', async () => {
   const before = publicRows();
-  const after = before.map(row => row.symbol === 'OTHER1' ? Object.assign({}, row, { value:999 }) : row);
-  const plans = ALLOW_LIST.map(symbol => {
+  const after = before.map(row => row.symbol === 'OTHER1' ? Object.assign({}, row, { value:999 }) :
+    DEFAULT_SYMBOLS.includes(row.symbol) ? Object.assign({}, row, { is_manual:false }) : row);
+  const plans = DEFAULT_SYMBOLS.map(symbol => {
     const row = after.find(item => item.symbol === symbol);
-    return { symbol, to:{ observation_date:row.as_of, value:row.value, previous_value:row.previous_value } };
+    return { symbol, to:{
+      observation_date:row.as_of,
+      value:row.value,
+      previous_value:row.previous_value,
+      source:row.source,
+      frequency:row.frequency
+    } };
   });
   await assert.rejects(verifyReadback({}, plans,
     async () => response(JSON.stringify(after)), before, fastReadbackOptions()),
   error => error.code === 'READBACK_NON_TARGET_CHANGED');
 });
 
-test('repository rejects symbols outside the three-indicator allow-list', async () => {
+test('repository rejects symbols outside the four-indicator explicit allow-list', async () => {
   const repository = new IndicatorRepository({ query:async () => ({ rows:[] }) }, ALLOW_LIST);
   await assert.rejects(repository.readCurrent(['SPX']), error => error.code === 'REPOSITORY_ALLOW_LIST_VIOLATION');
 });
@@ -514,7 +591,7 @@ test('runner classifies failures before and inside repository.apply without leak
 
   await assert.rejects(runFredConnector({
     repository:{
-      readCurrent:async () => [currentRow('US10Y')],
+      readCurrent:async () => [publicRows().find(row => row.symbol === 'US10Y')],
       apply:async () => { throw new Error('SQL statement detail'); }
     },
     dryRun:false,

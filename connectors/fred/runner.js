@@ -1,6 +1,6 @@
 'use strict';
 
-const { ALLOW_LIST, getIndicatorDefinition } = require('./catalog');
+const { ALLOW_LIST, DEFAULT_SYMBOLS, getIndicatorDefinition } = require('./catalog');
 const { fetchFredCsv } = require('./fetcher');
 const { adaptFredCsv } = require('./adapter');
 const { validateRecord } = require('./validator');
@@ -72,7 +72,7 @@ function connectorFailure(code) {
 }
 
 function selectedSymbols(value) {
-  const symbols = value === undefined ? ALLOW_LIST : value;
+  const symbols = value === undefined ? DEFAULT_SYMBOLS : value;
   if (!Array.isArray(symbols) || symbols.length === 0 ||
       new Set(symbols).size !== symbols.length || symbols.some(symbol => !ALLOW_LIST.includes(symbol))) {
     throw connectorFailure('FRED_INDICATOR_SELECTION_INVALID');
@@ -87,7 +87,19 @@ function validObservationDate(value) {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
 }
 
-function validatePublicRows(rows, requiredSymbols = []) {
+function sameBaseline(row, expected) {
+  return row && expected && String(row.as_of || '') === String(expected.as_of || '') &&
+    Number(row.value) === Number(expected.value) &&
+    Number(row.previous_value) === Number(expected.previous_value) &&
+    String(row.value_unit || '') === String(expected.value_unit || '') &&
+    String(row.category || '') === String(expected.category || '') &&
+    String(row.change_type || '') === String(expected.change_type || '') &&
+    String(row.source || '') === String(expected.source || '') &&
+    String(row.frequency || '') === String(expected.frequency || '') &&
+    row.is_manual === expected.is_manual;
+}
+
+function validatePublicRows(rows, requiredSymbols = [], expectedRows = []) {
   if (!Array.isArray(rows)) throw connectorFailure('READBACK_SHAPE_INVALID');
   if (rows.length !== EXPECTED_INDICATOR_COUNT ||
       new Set(rows.map(row => row && row.symbol)).size !== EXPECTED_INDICATOR_COUNT) {
@@ -98,7 +110,14 @@ function validatePublicRows(rows, requiredSymbols = []) {
     const definition = getIndicatorDefinition(symbol);
     if (!row || !validObservationDate(row.as_of) || !Number.isFinite(Number(row.value)) ||
         !Number.isFinite(Number(row.previous_value)) || row.value_unit !== definition.databaseUnit ||
-        row.source !== definition.source) {
+        typeof row.source !== 'string' || !row.source.trim()) {
+      throw connectorFailure('READBACK_BASELINE_MISMATCH');
+    }
+  }
+  const expectedBySymbol = new Map(expectedRows.map(row => [row && row.symbol, row]));
+  for (const symbol of requiredSymbols) {
+    if (expectedBySymbol.size > 0 &&
+        !sameBaseline(rows.find(row => row && row.symbol === symbol), expectedBySymbol.get(symbol))) {
       throw connectorFailure('READBACK_BASELINE_MISMATCH');
     }
   }
@@ -166,7 +185,7 @@ async function readPublicIndicators(environment, fetchImplementation, options = 
     try {
       const rows = await readPublicIndicatorsOnce(baseUrl, fetchImplementation,
         Math.min(attemptTimeoutMs, remainingMs));
-      return validatePublicRows(rows, options.requiredSymbols || []);
+      return validatePublicRows(rows, options.requiredSymbols || [], options.expectedRows || []);
     } catch (error) {
       lastError = error;
       const retryable = error && (error.code === 'READBACK_TIMEOUT' ||
@@ -191,7 +210,9 @@ async function verifyReadback(environment, plans, fetchImplementation, beforeRow
   for (const plan of plans) {
     const row = rows.find(item => item && item.symbol === plan.symbol);
     if (!row || String(row.as_of) !== plan.to.observation_date ||
-        Number(row.value) !== plan.to.value || Number(row.previous_value) !== plan.to.previous_value) {
+        Number(row.value) !== plan.to.value || Number(row.previous_value) !== plan.to.previous_value ||
+        String(row.source || '') !== plan.to.source ||
+        String(row.frequency || '') !== plan.to.frequency || row.is_manual !== false) {
       throw Object.assign(new Error('Readback failed.'), { code:'READBACK_MISMATCH' });
     }
   }
@@ -238,7 +259,10 @@ async function runFredConnector(options) {
 
   const beforeRows = await atStage('readback', () =>
     readPublicIndicators(options.environment, fetchImplementation,
-      Object.assign({}, options.readbackOptions, { requiredSymbols:symbols })));
+      Object.assign({}, options.readbackOptions, {
+        requiredSymbols:symbols,
+        expectedRows:currentRows
+      })));
   const result = await atStage('repository-apply', () => repository.apply(plans));
   const readback = await atStage('readback', () =>
     verifyReadback(options.environment, plans, fetchImplementation, beforeRows,
