@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+const DEFAULT_TARGETS = require('./production-targets');
 const PROJECT_REF_PATTERN = /^[a-z0-9]{8,64}$/i;
 const WRITE_CONFIRMATION = 'production-fred-mvp';
 
@@ -41,28 +43,45 @@ function maskProjectRef(value) {
   return ref.length > 8 ? `${ref.slice(0, 4)}...${ref.slice(-4)}` : 'configured';
 }
 
+function hashProjectRef(value) {
+  return crypto.createHash('sha256').update(String(value || '').trim().toLowerCase()).digest('hex');
+}
+
 function assertProductionSafety(environment, options = {}) {
   const appEnv = String(environment.APP_ENV || '').trim().toLowerCase();
   const allowRef = String(environment.PRODUCTION_SUPABASE_PROJECT_REF || '').trim().toLowerCase();
   const stagingRef = String(environment.STAGING_SUPABASE_PROJECT_REF || '').trim().toLowerCase();
   const target = databaseTarget(environment.DATABASE_URL);
   const supabaseRef = projectRefFromSupabaseUrl(environment.SUPABASE_URL);
+  const targetConfig = options.targetConfig || DEFAULT_TARGETS;
   const writeRequested = options.writeRequested === true;
 
   if (appEnv !== 'production') throw new Error('FRED connector refused: APP_ENV must be production.');
-  if (!PROJECT_REF_PATTERN.test(allowRef)) throw new Error('FRED connector refused: Production allow-list is required.');
-  if (!PROJECT_REF_PATTERN.test(stagingRef)) throw new Error('FRED connector refused: Staging deny-list is required.');
   if (!target.valid || !target.projectRef || !target.database) {
     throw new Error('FRED connector refused: database target cannot be verified.');
   }
-  if (!supabaseRef || target.projectRef !== allowRef || supabaseRef !== allowRef) {
+  if (!/^[a-f0-9]{64}$/.test(String(targetConfig.productionProjectRefSha256 || '')) ||
+      hashProjectRef(target.projectRef) !== targetConfig.productionProjectRefSha256) {
     throw new Error('FRED connector refused: target does not match the Production allow-list.');
   }
-  if (target.projectRef === stagingRef) throw new Error('FRED connector refused: target matches Staging.');
+  if (!/^[a-f0-9]{64}$/.test(String(targetConfig.stagingProjectRefSha256 || '')) ||
+      hashProjectRef(target.projectRef) === targetConfig.stagingProjectRefSha256) {
+    throw new Error('FRED connector refused: target matches Staging deny-list.');
+  }
+  if (allowRef && (!PROJECT_REF_PATTERN.test(allowRef) || target.projectRef !== allowRef)) {
+    throw new Error('FRED connector refused: explicit Production reference is inconsistent.');
+  }
+  if (stagingRef && (!PROJECT_REF_PATTERN.test(stagingRef) ||
+      hashProjectRef(stagingRef) !== targetConfig.stagingProjectRefSha256 || target.projectRef === stagingRef)) {
+    throw new Error('FRED connector refused: explicit Staging deny-list is inconsistent.');
+  }
+  if (environment.SUPABASE_URL && (!supabaseRef || target.projectRef !== supabaseRef)) {
+    throw new Error('FRED connector refused: Supabase URL is inconsistent with the database target.');
+  }
   if (writeRequested && options.confirmation !== WRITE_CONFIRMATION) {
     throw new Error('FRED connector refused: explicit write confirmation is required.');
   }
-  if (writeRequested) productionPublicUrl(environment);
+  if (writeRequested) productionPublicUrl(environment, targetConfig);
 
   return {
     environment:'production',
@@ -72,8 +91,9 @@ function assertProductionSafety(environment, options = {}) {
   };
 }
 
-function productionPublicUrl(environment) {
-  const value = String(environment.PRODUCTION_PUBLIC_URL || environment.RENDER_EXTERNAL_URL || '').trim();
+function productionPublicUrl(environment, targetConfig = DEFAULT_TARGETS) {
+  const expected = String(targetConfig.productionPublicOrigin || '').trim();
+  const value = String(environment.PRODUCTION_PUBLIC_URL || environment.RENDER_EXTERNAL_URL || expected).trim();
   let parsed;
   try { parsed = new URL(value); } catch (error) {
     throw new Error('FRED connector refused: Production readback URL is required.');
@@ -82,6 +102,9 @@ function productionPublicUrl(environment) {
       /^(?:localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(parsed.hostname)) {
     throw new Error('FRED connector refused: Production readback URL is invalid.');
   }
+  if (!expected || parsed.origin !== expected) {
+    throw new Error('FRED connector refused: Production readback URL does not match the allow-list.');
+  }
   return parsed.origin;
 }
 
@@ -89,6 +112,7 @@ module.exports = {
   WRITE_CONFIRMATION,
   assertProductionSafety,
   databaseTarget,
+  hashProjectRef,
   productionPublicUrl,
   projectRefFromSupabaseUrl
 };

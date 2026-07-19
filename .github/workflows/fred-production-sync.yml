@@ -1,0 +1,71 @@
+name: FRED Production Sync
+
+on:
+  schedule:
+    - cron: '30 0 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fred-production-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Validate and sync FRED Production indicators
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      APP_ENV: production
+      DATABASE_URL: ${{ secrets.FRED_PRODUCTION_DATABASE_URL }}
+      FRED_PRODUCTION_WRITE_CONFIRMATION: ${{ secrets.FRED_PRODUCTION_WRITE_CONFIRMATION }}
+
+    steps:
+      - name: Checkout main commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require Production FRED secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "FRED_PRODUCTION_DATABASE_URL is required."
+            missing=1
+          fi
+          if [ -z "${FRED_PRODUCTION_WRITE_CONFIRMATION:-}" ]; then
+            echo "FRED_PRODUCTION_WRITE_CONFIRMATION is required."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check tracked JavaScript syntax
+        run: git ls-files -z '*.js' | xargs -0 -n1 node --check
+
+      - name: FRED Production dry-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-fred-connector.js --dry-run > "$RUNNER_TEMP/fred-dry-run.log" 2>&1
+          node scripts/summarize-fred-run.js "$RUNNER_TEMP/fred-dry-run.log" "FRED Production dry-run" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply FRED Production update once
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-fred-connector.js --apply "--confirm=$FRED_PRODUCTION_WRITE_CONFIRMATION" > "$RUNNER_TEMP/fred-apply.log" 2>&1
+          node scripts/summarize-fred-run.js "$RUNNER_TEMP/fred-apply.log" "FRED Production apply" | tee -a "$GITHUB_STEP_SUMMARY"
