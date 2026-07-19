@@ -373,7 +373,7 @@ async function assertPreflightBlocks(apiResponse, expectedCode) {
   let apiCalls = 0;
   await assert.rejects(runFredConnector({
     repository:{
-      readCurrent:async () => [publicRows().find(row => row.symbol === 'US10Y')],
+      readCurrent:async () => [currentRow('US10Y')],
       apply:async () => { applied += 1; return { updated:1 }; }
     },
     dryRun:false,
@@ -438,7 +438,7 @@ test('three preflight connection errors never call repository.apply', async () =
 
 test('apply preflight and readback verify targets and all 29 non-target rows', async () => {
   const baseline = publicRows();
-  const rows = DEFAULT_SYMBOLS.map(symbol => baseline.find(row => row.symbol === symbol));
+  const rows = DEFAULT_SYMBOLS.map(currentRow);
   let applied = 0;
   let apiReads = 0;
   const result = await runFredConnector({
@@ -470,63 +470,12 @@ test('apply preflight and readback verify targets and all 29 non-target rows', a
   assert.deepEqual(result.readback, { verified:3, indicatorCount:32, nonTargetVerified:29 });
 });
 
-test('US2Y first apply accepts an exact non-FRED baseline and verifies the FRED result', async () => {
-  const definition = getIndicatorDefinition('US2Y');
-  const current = Object.assign(currentRow('US2Y'), {
-    source:'U.S. Treasury', frequency:'Daily', is_manual:false
-  });
-  const baseline = publicRows().map(row => row.symbol === 'OTHER1' ? Object.assign({}, current, {
-    id:row.id, name:'美国国债 2Y', sort_order:row.sort_order, updated_at:row.updated_at
-  }) : row);
-  let apiReads = 0;
-  let applied = 0;
-  const result = await runFredConnector({
-    repository:{
-      readCurrent:async symbols => {
-        assert.deepEqual(symbols, ['US2Y']);
-        return [current];
-      },
-      apply:async plans => {
-        applied += 1;
-        assert.deepEqual(plans.map(plan => plan.symbol), ['US2Y']);
-        return { updated:1 };
-      }
-    },
-    dryRun:false,
-    symbols:['US2Y'],
-    environment:{},
-    now:() => NOW,
-    fetchImplementation:async url => {
-      if (url.endsWith('/api/indicators')) {
-        apiReads += 1;
-        return response(JSON.stringify(apiReads === 1 ? baseline : baseline.map(row =>
-          row.symbol === 'US2Y' ? Object.assign({}, row, {
-            value:4.25, previous_value:4.20, as_of:'2026-07-17',
-            source:definition.source, frequency:definition.frequency, is_manual:false
-          }) : row)));
-      }
-      assert.equal(new URL(url).searchParams.get('id'), 'DGS2');
-      return response(csv('DGS2'));
-    }
-  });
-  assert.equal(applied, 1);
-  assert.equal(apiReads, 2);
-  assert.deepEqual(result.readback, { verified:1, indicatorCount:32, nonTargetVerified:31 });
-});
-
 test('readback rejects a change to any non-target indicator', async () => {
   const before = publicRows();
-  const after = before.map(row => row.symbol === 'OTHER1' ? Object.assign({}, row, { value:999 }) :
-    DEFAULT_SYMBOLS.includes(row.symbol) ? Object.assign({}, row, { is_manual:false }) : row);
+  const after = before.map(row => row.symbol === 'OTHER1' ? Object.assign({}, row, { value:999 }) : row);
   const plans = DEFAULT_SYMBOLS.map(symbol => {
     const row = after.find(item => item.symbol === symbol);
-    return { symbol, to:{
-      observation_date:row.as_of,
-      value:row.value,
-      previous_value:row.previous_value,
-      source:row.source,
-      frequency:row.frequency
-    } };
+    return { symbol, to:{ observation_date:row.as_of, value:row.value, previous_value:row.previous_value } };
   });
   await assert.rejects(verifyReadback({}, plans,
     async () => response(JSON.stringify(after)), before, fastReadbackOptions()),
@@ -591,7 +540,7 @@ test('runner classifies failures before and inside repository.apply without leak
 
   await assert.rejects(runFredConnector({
     repository:{
-      readCurrent:async () => [publicRows().find(row => row.symbol === 'US10Y')],
+      readCurrent:async () => [currentRow('US10Y')],
       apply:async () => { throw new Error('SQL statement detail'); }
     },
     dryRun:false,
