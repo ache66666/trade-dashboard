@@ -33,9 +33,12 @@ A formal write is intentionally not wrapped in an npm shortcut. It requires all 
 - a distinct tracked Staging Project Ref hash deny-list;
 - `--apply` and the exact explicit confirmation argument;
 - current-value read before writes;
-- all three records valid before the transaction begins;
+- every selected record valid before the transaction begins;
 - one transaction limited to `US10Y`, `USDCNY`, and `WTI`;
 - successful readback through the existing Production indicators API.
+
+An operator can further restrict an invocation with `--indicator=US10Y`. Empty, duplicate, or unknown
+indicator selections fail closed and never fall back to the default three-indicator run.
 
 Never store the confirmation argument in an environment file. This MVP has no scheduler and must not be invoked automatically.
 
@@ -46,6 +49,9 @@ The optional `FRED Production Sync` workflow runs at 00:30 UTC (08:30 China Stan
 ## Failure behavior
 
 - Network, HTTP, HTML, empty body, invalid CSV, invalid values, wrong units, unexpected symbols, dates moving backward, or range violations stop the entire run before writes.
+- Production API readback retries only timeouts and connection failures, with at most three attempts,
+  short increasing delays, and a fixed total time limit. HTTP, JSON, indicator-set, and baseline failures
+  stop immediately without entering the repository write path.
 - A repository failure rolls back the transaction, preserving the previous snapshot.
 - Repeating a run with the same date, values, source, and frequency is a no-op.
 - Logs contain indicator codes and fixed error classifications only; they do not include response bodies, credentials, or database targets.
