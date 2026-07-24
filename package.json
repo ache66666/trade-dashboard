@@ -4,7 +4,8 @@
   "private": true,
   "description": "交易员市场数据工作台",
   "scripts": {
-    "start": "node --env-file=.env server.js",
+    "start": "node server.js",
+    "start:local": "node --env-file=.env server.js",
     "test": "node --test",
     "data:fred:dry-run": "node --env-file=.env.production.local scripts/run-fred-connector.js --dry-run",
     "journal:migration:production:dry-run": "node scripts/migrate-production-journal.js --dry-run",
