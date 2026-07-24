@@ -48,7 +48,7 @@ function validateImageMetadata(images) {
     const allowedExtensions = MIME_EXTENSIONS[mimeType];
     const extensionMatch = originalFilename && /\.([a-z0-9]+)$/i.exec(originalFilename);
     const extension = extensionMatch ? extensionMatch[1].toLowerCase() : '';
-    if (!originalFilename || /[\/\\\0]/.test(originalFilename) || DANGEROUS_EXTENSION.test(originalFilename)) {
+    if (!originalFilename || /[\/\\\u0000-\u001f\u007f]/.test(originalFilename) || DANGEROUS_EXTENSION.test(originalFilename)) {
       return { error:'A screenshot filename is not allowed' };
     }
     if (!allowedExtensions || !allowedExtensions.includes(extension)) {

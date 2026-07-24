@@ -76,6 +76,7 @@ CREATE TABLE public.morning_meeting_images (
   CONSTRAINT morning_meeting_images_filename_check CHECK (
     char_length(original_filename) BETWEEN 1 AND 180
     AND original_filename !~ '[\\/]'
+    AND original_filename !~ '[[:cntrl:]]'
     AND original_filename !~* '\.(exe|com|bat|cmd|ps1|sh|js|html?|svg|pdf|php|jar|msi)(\.|$)'
     AND (
       (mime_type = 'image/jpeg' AND original_filename ~* '\.(jpe?g)$')

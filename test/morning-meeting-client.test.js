@@ -32,6 +32,8 @@ test('Morning upload UX supports multiple safe image types and private messaging
   assert.match(client, /FileReader/);
   assert.match(client, /bytesMatch/);
   assert.match(client, /window\.URL\.revokeObjectURL/);
+  assert.match(client, /addEventListener\('pagehide', clearPreviewUrls/);
+  assert.match(client, /addEventListener\('beforeunload', clearPreviewUrls/);
 });
 
 test('PWA manifest is installable and identifies Market Coach', () => {

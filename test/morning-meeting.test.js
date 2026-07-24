@@ -71,6 +71,7 @@ test('screenshot metadata rejects unsafe MIME, extension, and path names', () =>
     { original_filename:'market.pdf', mime_type:'application/pdf', size_bytes:100 },
     { original_filename:'market.html.png', mime_type:'image/png', size_bytes:100 },
     { original_filename:'..\\market.png', mime_type:'image/png', size_bytes:100 },
+    { original_filename:"market\nname.png", mime_type:'image/png', size_bytes:100 },
     { original_filename:'market.jpg.exe', mime_type:'image/jpeg', size_bytes:100 },
     { original_filename:'market.png', mime_type:'image/jpeg', size_bytes:100 }
   ]) {

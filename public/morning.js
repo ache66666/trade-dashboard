@@ -319,6 +319,8 @@
     byId('morningConfidence').oninput = function () { byId('morningConfidenceValue').textContent = this.value; };
     byId('morningForm').onsubmit = saveMeeting;
     if (auth) auth.onChange(syncAuth);
+    window.addEventListener('pagehide', clearPreviewUrls, false);
+    window.addEventListener('beforeunload', clearPreviewUrls, false);
     renderPreviews();
     syncAuth();
     registerServiceWorker();
