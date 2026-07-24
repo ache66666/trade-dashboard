@@ -190,7 +190,7 @@
     byId('journalOverviewLink').hidden = !authenticated;
     if (!authenticated && byId('journal').className.indexOf('active') >= 0) {
       populate(null);
-      workbench.showPage('overview');
+      workbench.showPage('morning');
     }
   }
   function openJournal() {

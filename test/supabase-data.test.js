@@ -59,3 +59,75 @@ test('missing Data API configuration fails lazily', async () => {
   await assert.rejects(client.getDailyNote('2026-07-15', 'user-id', 'token'), /Journal data service unavailable/);
   assert.equal(calls, 0);
 });
+
+test('Morning Meeting reads are always scoped to the verified user', async () => {
+  const calls = [];
+  const client = createSupabaseDataClient({ config, fetchImpl:async function (url, options) {
+    calls.push({ url, options });
+    return response(200, []);
+  } });
+  await client.listMorningMeetings('verified-user-id', 'verified-user-token');
+  await client.getMorningMeeting('11111111-1111-4111-8111-111111111111', 'verified-user-id', 'verified-user-token');
+  assert.equal(new URL(calls[0].url).searchParams.get('user_id'), 'eq.verified-user-id');
+  assert.equal(new URL(calls[1].url).searchParams.get('user_id'), 'eq.verified-user-id');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer verified-user-token');
+});
+
+test('Morning Meeting writes ignore client identity and preserve metadata-only storage', async () => {
+  const calls = [];
+  const client = createSupabaseDataClient({ config, fetchImpl:async function (url, options) {
+    const parsed = options.body ? JSON.parse(options.body) : null;
+    calls.push({ url, options, parsed });
+    if (String(url).includes('morning_meetings')) return response(200, [{ id:'11111111-1111-4111-8111-111111111111', ...(parsed || {}) }]);
+    return response(options.method === 'DELETE' ? 204 : 200, Array.isArray(parsed) ? parsed : []);
+  } });
+  const meeting = {
+    user_id:'attacker',
+    meeting_date:'2026-07-24',
+    primary_driver:'Liquidity',
+    evidence:'',
+    contradiction:'',
+    need_to_verify:'',
+    confidence:50,
+    my_view:'Private view',
+    review_notes:'',
+    images:[]
+  };
+  await client.upsertMorningMeeting(meeting, 'verified-user-id', 'verified-token');
+  await client.replaceMorningMeetingImages(
+    '11111111-1111-4111-8111-111111111111',
+    [{ original_filename:'market.png', mime_type:'image/png', size_bytes:100 }],
+    'verified-user-id',
+    'verified-token'
+  );
+  assert.equal(calls[0].parsed.user_id, 'verified-user-id');
+  assert.equal(calls[0].parsed.analysis_status, 'not_configured');
+  assert.equal(calls[2].parsed[0].user_id, 'verified-user-id');
+  assert.equal(calls[2].parsed[0].storage_path, null);
+  assert.equal(calls[2].parsed[0].upload_status, 'metadata_only');
+});
+
+test('Morning Meeting update and delete require both record and verified user', async () => {
+  const calls = [];
+  const client = createSupabaseDataClient({ config, fetchImpl:async function (url, options) {
+    calls.push({ url, options });
+    return response(options.method === 'DELETE' ? 200 : 200, []);
+  } });
+  const meeting = {
+    meeting_date:'2026-07-24',
+    primary_driver:'Risk',
+    evidence:'',
+    contradiction:'',
+    need_to_verify:'',
+    confidence:40,
+    my_view:'Private view',
+    review_notes:''
+  };
+  await client.updateMorningMeeting('11111111-1111-4111-8111-111111111111', meeting, 'user-a', 'token-a');
+  await client.deleteMorningMeeting('11111111-1111-4111-8111-111111111111', 'user-a', 'token-a');
+  for (const call of calls) {
+    const url = new URL(call.url);
+    assert.equal(url.searchParams.get('id'), 'eq.11111111-1111-4111-8111-111111111111');
+    assert.equal(url.searchParams.get('user_id'), 'eq.user-a');
+  }
+});

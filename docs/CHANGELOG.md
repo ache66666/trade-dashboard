@@ -65,3 +65,13 @@ v0.1–v0.5 根据现有 Git 历史整理，目前未补建对应 Git tag。
 - 初始市场工作台。
 - SQLite 本地数据存储。
 - 指标、宏观事件、搜索、编辑和刷新功能。
+# Market Coach Mobile MVP
+
+- Added a mobile-first private Morning Meeting entry point.
+- Added review-only Morning Meeting and screenshot metadata Migration 003 with
+  forced RLS and per-user policies.
+- Added local screenshot previews, signature/MIME/size validation, private
+  history, and an explicit metadata-only storage boundary.
+- Added a minimal PWA manifest and static-only Service Worker.
+- OCR, AI analysis, screenshot byte storage, sharing, and Production migration
+  remain intentionally out of scope.
