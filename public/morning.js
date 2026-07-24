@@ -6,6 +6,7 @@
   var existingImages = [];
   var previewUrls = [];
   var currentMeetingId = null;
+  var currentAnalysis = null;
   var limits = { count:12, fileBytes:10 * 1024 * 1024, totalBytes:60 * 1024 * 1024 };
   var mimeExtensions = {
     'image/jpeg':['jpg', 'jpeg'],
@@ -95,7 +96,7 @@
         image.src = url;
         image.alt = '';
         name.textContent = file.name;
-        status.textContent = 'Selected · local preview only';
+        status.textContent = 'Selected · saves to private storage';
         remove.type = 'button';
         remove.textContent = 'Remove';
         remove.onclick = function () {
@@ -119,9 +120,9 @@
         var status = document.createElement('small');
         var remove = document.createElement('button');
         placeholder.className = 'metadata-placeholder';
-        placeholder.textContent = 'Metadata';
+        placeholder.textContent = imageMetadata.upload_status === 'stored' ? 'Stored' : 'Metadata';
         name.textContent = imageMetadata.original_filename;
-        status.textContent = 'Metadata saved · screenshot file not stored';
+        status.textContent = imageMetadata.upload_status === 'stored' ? 'Private file stored' : 'File not stored';
         remove.type = 'button';
         remove.textContent = 'Remove';
         remove.onclick = function () {
@@ -139,7 +140,7 @@
     root.appendChild(fragment);
     if (!selectedFiles.length && !existingImages.length) root.innerHTML = '<p class="empty">No screenshots selected.</p>';
     setStatus(
-      (selectedFiles.length + existingImages.length) + ' screenshot item(s). New screenshot files remain local; only validated metadata is saved.',
+      (selectedFiles.length + existingImages.length) + ' screenshot item(s). New files are uploaded only after Save.',
       selectedFiles.length ? 'ready' : ''
     );
   }
@@ -167,13 +168,13 @@
     if (status === 503) return 'Morning Meeting service is temporarily unavailable.';
     return 'The request failed. Please try again.';
   }
-  function request(method, url, payload, done) {
+  function request(method, url, payload, done, timeoutMs) {
     auth.getAccessToken(function (tokenError, token) {
       var xhr;
       if (tokenError || !token) { done(new Error('Please sign in first.')); return; }
       xhr = new XMLHttpRequest();
       xhr.open(method, url, true);
-      xhr.timeout = 12000;
+      xhr.timeout = timeoutMs || 12000;
       xhr.setRequestHeader('Authorization', 'Bearer ' + token);
       if (payload !== null) xhr.setRequestHeader('Content-Type', 'application/json');
       xhr.onload = function () {
@@ -187,6 +188,50 @@
       xhr.send(payload === null ? null : JSON.stringify(payload));
     });
   }
+  function uploadFile(meetingId, imageId, file, done) {
+    auth.getAccessToken(function (tokenError, token) {
+      var xhr;
+      if (tokenError || !token) { done(new Error('Please sign in first.')); return; }
+      xhr = new XMLHttpRequest();
+      xhr.open('PUT', '/api/morning-meetings/' + encodeURIComponent(meetingId) + '/images/' + encodeURIComponent(imageId) + '/content', true);
+      xhr.timeout = 30000;
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.setRequestHeader('Content-Type', file.type);
+      xhr.onload = function () {
+        var data = null;
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch (error) {}
+        if (xhr.status >= 200 && xhr.status < 300) { done(null, data); return; }
+        done(new Error(safeError(xhr.status, data)));
+      };
+      xhr.onerror = function () { done(new Error('Screenshot upload failed.')); };
+      xhr.ontimeout = function () { done(new Error('Screenshot upload timed out.')); };
+      xhr.send(file);
+    });
+  }
+  function uploadSelectedFiles(meeting, files, done) {
+    var available = meeting.images ? meeting.images.slice(0) : [];
+    var index = 0;
+    function next(error) {
+      var matchIndex = -1;
+      var i;
+      if (error || index >= files.length) { done(error); return; }
+      for (i = 0; i < available.length; i += 1) {
+        if (available[i] && available[i].original_filename === files[index].name &&
+            available[i].mime_type === files[index].type &&
+            Number(available[i].size_bytes) === files[index].size) {
+          matchIndex = i;
+          break;
+        }
+      }
+      if (matchIndex < 0) { done(new Error('Saved screenshot metadata could not be matched.')); return; }
+      uploadFile(meeting.id, available[matchIndex].id, files[index], function (uploadError) {
+        available[matchIndex] = null;
+        index += 1;
+        next(uploadError);
+      });
+    }
+    next();
+  }
   function imagePayload() {
     var result = [];
     var i;
@@ -196,6 +241,7 @@
       size_bytes:selectedFiles[i].size
     });
     for (i = 0; i < existingImages.length; i += 1) result.push({
+      id:existingImages[i].id,
       original_filename:existingImages[i].original_filename,
       mime_type:existingImages[i].mime_type,
       size_bytes:existingImages[i].size_bytes
@@ -216,6 +262,106 @@
       images:imagePayload()
     };
   }
+  function analysisHasLowConfidence(data) {
+    var groups = ['rates', 'fx', 'equities', 'commodities', 'credit', 'events', 'risks', 'trade_ideas', 'uncertain_items'];
+    var i;
+    var j;
+    for (i = 0; i < groups.length; i += 1) {
+      if (!data || !data[groups[i]]) continue;
+      for (j = 0; j < data[groups[i]].length; j += 1) {
+        if (Number(data[groups[i]][j].confidence) < 0.6) return true;
+      }
+    }
+    return Boolean(data && data.uncertain_items && data.uncertain_items.length);
+  }
+  function structuredHtml(data) {
+    var groups = ['rates', 'fx', 'equities', 'commodities', 'credit', 'events', 'risks', 'trade_ideas', 'uncertain_items'];
+    var html = '<h4>Structured facts</h4><p><b>' + escapeHtml(data.title || 'Untitled') + '</b> · ' +
+      escapeHtml(data.meeting_date || 'Date unconfirmed') + '</p><p>' + escapeHtml(data.market_summary || '') + '</p>';
+    var i;
+    var j;
+    for (i = 0; i < groups.length; i += 1) {
+      if (!data[groups[i]] || !data[groups[i]].length) continue;
+      html += '<section><h5>' + escapeHtml(groups[i].replace(/_/g, ' ')) + '</h5><ul>';
+      for (j = 0; j < data[groups[i]].length; j += 1) {
+        html += '<li><b>' + escapeHtml(data[groups[i]][j].name) + '</b> ' +
+          escapeHtml(data[groups[i]][j].value === null ? 'Unconfirmed' : data[groups[i]][j].value) +
+          (data[groups[i]][j].unit ? ' ' + escapeHtml(data[groups[i]][j].unit) : '') +
+          '<small>Fact: ' + escapeHtml(data[groups[i]][j].source_text || 'No source text') +
+          ' · confidence ' + escapeHtml(Math.round(Number(data[groups[i]][j].confidence) * 100)) + '%</small></li>';
+      }
+      html += '</ul></section>';
+    }
+    return html;
+  }
+  function renderAnalysis(analysis) {
+    var stored = existingImages.length > 0;
+    var i;
+    for (i = 0; i < existingImages.length; i += 1) {
+      if (existingImages[i].upload_status !== 'stored') stored = false;
+    }
+    currentAnalysis = analysis || null;
+    byId('analysisResult').hidden = true;
+    byId('morningRetryButton').hidden = true;
+    byId('analysisCompletedAt').textContent = '';
+    byId('morningAnalyzeButton').disabled = !currentMeetingId || !stored;
+    byId('morningAnalyzeButton').hidden = false;
+    if (!analysis) {
+      byId('analysisState').textContent = stored
+        ? 'Ready for a private, manually triggered analysis.'
+        : 'Save a meeting with at least one stored screenshot to analyze it.';
+      return;
+    }
+    if (analysis.status === 'processing') {
+      byId('analysisState').textContent = 'Processing. Please keep this page open.';
+      byId('morningAnalyzeButton').disabled = true;
+      return;
+    }
+    if (analysis.status === 'failed') {
+      byId('analysisState').textContent = analysis.error_message_safe || 'Analysis failed safely.';
+      byId('morningAnalyzeButton').hidden = true;
+      byId('morningRetryButton').hidden = false;
+      return;
+    }
+    if (analysis.status === 'completed') {
+      byId('analysisState').textContent = 'Analysis completed. Verify all low-confidence items against the source.';
+      byId('morningAnalyzeButton').hidden = true;
+      byId('analysisCompletedAt').textContent = analysis.completed_at ? new Date(analysis.completed_at).toLocaleString() : '';
+      byId('analysisExtractedText').textContent = analysis.extracted_text || '';
+      byId('analysisStructuredData').innerHTML = structuredHtml(analysis.structured_data || {});
+      byId('analysisText').textContent = analysis.analysis_text || '';
+      byId('analysisWarning').hidden = !analysisHasLowConfidence(analysis.structured_data);
+      byId('analysisResult').hidden = false;
+    }
+  }
+  function loadAnalysis() {
+    if (!currentMeetingId) { renderAnalysis(null); return; }
+    request('GET', '/api/morning-meetings/' + encodeURIComponent(currentMeetingId) + '/analysis', null, function (error, data) {
+      if (error) { byId('analysisState').textContent = 'Analysis status is temporarily unavailable.'; return; }
+      renderAnalysis(data.analysis || null);
+    });
+  }
+  function analyzeMeeting(retry) {
+    var button = retry ? byId('morningRetryButton') : byId('morningAnalyzeButton');
+    if (!currentMeetingId || !auth || !auth.getSession || !auth.getSession()) return;
+    button.disabled = true;
+    byId('analysisState').textContent = 'Processing screenshots securely on the server…';
+    request(
+      'POST',
+      '/api/morning-meetings/' + encodeURIComponent(currentMeetingId) + '/analysis',
+      { retry:Boolean(retry) },
+      function (error, data) {
+        button.disabled = false;
+        if (error) {
+          byId('analysisState').textContent = error.message;
+          loadAnalysis();
+          return;
+        }
+        renderAnalysis(data.analysis || null);
+      },
+      60000
+    );
+  }
   function populate(meeting) {
     var form = byId('morningForm');
     currentMeetingId = meeting ? meeting.id : null;
@@ -234,9 +380,11 @@
     byId('morningSaveState').textContent = meeting ? 'Saved metadata' : 'Not saved';
     byId('morningError').textContent = '';
     renderPreviews();
+    loadAnalysis();
   }
   function saveMeeting(event) {
     var payload = formPayload();
+    var filesToUpload = selectedFiles.slice(0);
     var button = byId('morningSaveButton');
     var method = currentMeetingId ? 'PUT' : 'POST';
     var url = currentMeetingId ? '/api/morning-meetings/' + encodeURIComponent(currentMeetingId) : '/api/morning-meetings';
@@ -249,13 +397,24 @@
       button.disabled = false;
       button.textContent = 'Save Private Meeting';
       if (error) { byId('morningError').textContent = error.message; return; }
-      populate(data.meeting);
-      setStatus('Meeting saved. Screenshot metadata is private; screenshot files are not permanently stored.', 'saved');
-      loadHistory();
+      uploadSelectedFiles(data.meeting, filesToUpload, function (uploadError) {
+        if (uploadError) {
+          populate(data.meeting);
+          byId('morningError').textContent = uploadError.message;
+          setStatus('Meeting metadata saved, but a screenshot was not stored.', 'error');
+          loadHistory();
+          return;
+        }
+        request('GET', '/api/morning-meetings/' + encodeURIComponent(data.meeting.id), null, function (readError, refreshed) {
+          populate(readError ? data.meeting : refreshed.meeting);
+          setStatus(filesToUpload.length ? 'Meeting and private screenshots saved.' : 'Meeting saved.', 'saved');
+          loadHistory();
+        });
+      });
     });
   }
   function historyCard(meeting) {
-    return '<article class="meeting-card" data-meeting-id="' + escapeHtml(meeting.id) + '"><div><time>' + escapeHtml(meeting.meeting_date) + '</time><b>' + escapeHtml(meeting.primary_driver) + '</b><p>' + escapeHtml(meeting.my_view) + '</p><small>' + escapeHtml(meeting.image_count) + ' screenshot metadata · confidence ' + escapeHtml(meeting.confidence) + '</small></div><div><button type="button" data-edit-meeting="' + escapeHtml(meeting.id) + '">Edit</button><button type="button" data-delete-meeting="' + escapeHtml(meeting.id) + '">Delete</button></div></article>';
+    return '<article class="meeting-card" data-meeting-id="' + escapeHtml(meeting.id) + '"><div><time>' + escapeHtml(meeting.meeting_date) + '</time><b>' + escapeHtml(meeting.primary_driver) + '</b><p>' + escapeHtml(meeting.my_view) + '</p><small>' + escapeHtml(meeting.image_count) + ' private screenshot(s) · confidence ' + escapeHtml(meeting.confidence) + '</small></div><div><button type="button" data-edit-meeting="' + escapeHtml(meeting.id) + '">Edit</button><button type="button" data-delete-meeting="' + escapeHtml(meeting.id) + '">Delete</button></div></article>';
   }
   function attachHistoryActions(meetings) {
     var edits = document.querySelectorAll('[data-edit-meeting]');
@@ -318,6 +477,8 @@
     byId('morningScreenshots').onchange = handleSelection;
     byId('morningConfidence').oninput = function () { byId('morningConfidenceValue').textContent = this.value; };
     byId('morningForm').onsubmit = saveMeeting;
+    byId('morningAnalyzeButton').onclick = function () { analyzeMeeting(false); };
+    byId('morningRetryButton').onclick = function () { analyzeMeeting(true); };
     if (auth) auth.onChange(syncAuth);
     window.addEventListener('pagehide', clearPreviewUrls, false);
     window.addEventListener('beforeunload', clearPreviewUrls, false);

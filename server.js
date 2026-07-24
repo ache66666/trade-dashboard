@@ -6,13 +6,19 @@ const logger = require('./logger');
 const { handleHealth } = require('./health');
 const { requireAuth } = require('./auth');
 const { validateJournal, validDate } = require('./journal');
-const { validateMorningMeeting, validId } = require('./morning-meeting');
-const { DATA_API_UNAVAILABLE, createSupabaseDataClient } = require('./supabase-data');
+const { IMAGE_LIMITS, imageBytesMatch, validateMorningMeeting, validId } = require('./morning-meeting');
+const { ANALYSIS_ERROR_CODES, ANALYSIS_LIMITS, createMorningAnalysisService } = require('./morning-analysis');
+const { DATA_API_CONFLICT, DATA_API_UNAVAILABLE, createSupabaseDataClient } = require('./supabase-data');
 const { getPool, query, closePool } = require('./database');
 
 const PORT = config.port;
 const ROOT = __dirname;
 const journalData = createSupabaseDataClient({ config });
+const morningAnalysis = createMorningAnalysisService({
+  apiKey:config.morningAnalysisApiKey,
+  model:config.morningAnalysisModel,
+  timeoutMs:config.morningAnalysisTimeoutMs
+});
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
@@ -55,11 +61,61 @@ function morningMeetingIdFromPath(pathname) {
   const match = /^\/api\/morning-meetings\/([0-9a-f-]+)$/i.exec(pathname);
   return match && validId(match[1]) ? match[1] : null;
 }
+function morningMeetingAnalysisIdFromPath(pathname) {
+  const match = /^\/api\/morning-meetings\/([0-9a-f-]+)\/analysis$/i.exec(pathname);
+  return match && validId(match[1]) ? match[1] : null;
+}
+function morningMeetingImageContentFromPath(pathname) {
+  const match = /^\/api\/morning-meetings\/([0-9a-f-]+)\/images\/([0-9a-f-]+)\/content$/i.exec(pathname);
+  return match && validId(match[1]) && validId(match[2]) ? { meetingId:match[1], imageId:match[2] } : null;
+}
 function isMorningMeetingRequest(req, url) {
   if (url.pathname === '/api/morning-meetings') return req.method === 'GET' || req.method === 'POST';
+  if (morningMeetingAnalysisIdFromPath(url.pathname)) return req.method === 'GET' || req.method === 'POST';
+  if (morningMeetingImageContentFromPath(url.pathname)) return req.method === 'PUT';
   return ['GET','PUT','DELETE'].includes(req.method) && Boolean(morningMeetingIdFromPath(url.pathname));
 }
 function body(req) { return new Promise((resolve,reject)=>{ let s=''; req.on('data',c=>{s+=c;if(s.length>1e6)reject(new Error('请求过大'));}); req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch(e){reject(e)}}); }); }
+function binaryBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let length = 0;
+    let settled = false;
+    req.on('data', chunk => {
+      if (settled) return;
+      length += chunk.length;
+      if (length > limit) {
+        settled = true;
+        const error = new Error('Screenshot exceeds the file size limit');
+        error.code = 'PAYLOAD_TOO_LARGE';
+        reject(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on('error', () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Screenshot upload failed'));
+    });
+  });
+}
+function imageExtension(filename) {
+  const match = /\.([a-z0-9]+)$/i.exec(String(filename || ''));
+  return match ? match[1].toLowerCase() : '';
+}
+function safeAnalysisFailure(code) {
+  if (code === ANALYSIS_ERROR_CODES.CONFIGURATION) return { status:503, message:'Morning Meeting analysis is not configured' };
+  if (code === ANALYSIS_ERROR_CODES.TIMEOUT) return { status:504, message:'Morning Meeting analysis timed out' };
+  if (code === ANALYSIS_ERROR_CODES.INVALID_RESPONSE) return { status:502, message:'Morning Meeting analysis returned an invalid result' };
+  if (code === 'ANALYSIS_DATA_UNAVAILABLE') return { status:503, message:'Morning Meeting analysis data is temporarily unavailable' };
+  return { status:502, message:'Morning Meeting analysis is temporarily unavailable' };
+}
 function validateIndicator(x) {
   const required=['symbol','name','category','value','previous_value','source','as_of','frequency','change_type'];
   if(required.some(k=>x[k]===undefined||x[k]===null||x[k]==='')) return '请填写所有必填字段';
@@ -180,12 +236,153 @@ const server = http.createServer(async (req,res)=>{
     }
     if (isMorningMeetingRequest(req, url)) {
       const meetingId = morningMeetingIdFromPath(url.pathname);
+      const analysisMeetingId = morningMeetingAnalysisIdFromPath(url.pathname);
+      const imageContent = morningMeetingImageContentFromPath(url.pathname);
       const user = await requireAuth(req, res, { config, logger, sendJson:json });
       let meetings;
       let images;
+      let previousImages = [];
+      let currentMeetingAnalysis = [];
       let input;
       let validation;
       if (!user) return;
+      if (imageContent) {
+        meetings = await journalData.getMorningMeeting(imageContent.meetingId, user.id, req.auth.accessToken);
+        if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+        images = await journalData.getMorningMeetingImage(
+          imageContent.imageId,
+          imageContent.meetingId,
+          user.id,
+          req.auth.accessToken
+        );
+        if (!images.length) return json(res,404,{error:'Morning Meeting screenshot not found'});
+        if (images[0].upload_status === 'stored') {
+          return json(res,409,{error:'Morning Meeting screenshot is already stored'});
+        }
+        const declaredLength = Number(req.headers['content-length']);
+        if (Number.isFinite(declaredLength) &&
+            (declaredLength > IMAGE_LIMITS.maxFileBytes || declaredLength !== Number(images[0].size_bytes))) {
+          return json(res,declaredLength > IMAGE_LIMITS.maxFileBytes ? 413 : 400,{
+            error:declaredLength > IMAGE_LIMITS.maxFileBytes
+              ? 'Screenshot exceeds the file size limit'
+              : 'Screenshot content does not match its metadata'
+          });
+        }
+        if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== images[0].mime_type) {
+          return json(res,400,{error:'Screenshot type does not match its metadata'});
+        }
+        const bytes = await binaryBody(req, IMAGE_LIMITS.maxFileBytes);
+        if (bytes.length !== Number(images[0].size_bytes) || !imageBytesMatch(images[0].mime_type, bytes)) {
+          return json(res,400,{error:'Screenshot content does not match its metadata'});
+        }
+        const objectPath = `${user.id}/${imageContent.meetingId}/${imageContent.imageId}.${imageExtension(images[0].original_filename)}`;
+        await journalData.uploadMorningMeetingImage(
+          config.morningMeetingStorageBucket,
+          objectPath,
+          bytes,
+          images[0].mime_type,
+          req.auth.accessToken
+        );
+        images = await journalData.markMorningMeetingImageStored(
+          imageContent.imageId,
+          imageContent.meetingId,
+          objectPath,
+          user.id,
+          req.auth.accessToken
+        );
+        return json(res,200,{ image:images[0] });
+      }
+      if (analysisMeetingId) {
+        meetings = await journalData.getMorningMeeting(analysisMeetingId, user.id, req.auth.accessToken);
+        if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+        let analyses = await journalData.getMorningMeetingAnalysis(analysisMeetingId, user.id, req.auth.accessToken);
+        if (req.method === 'GET') return json(res,200,{ analysis:analyses[0] || null });
+
+        input = await body(req);
+        images = await journalData.listMorningMeetingImages([analysisMeetingId], user.id, req.auth.accessToken);
+        const storedImages = images.filter(image => image.upload_status === 'stored' && image.storage_path);
+        const declaredAnalysisBytes = storedImages.reduce((total, image) => total + Number(image.size_bytes), 0);
+        if (!storedImages.length || storedImages.length !== images.length) {
+          return json(res,400,{error:'A stored screenshot is required before analysis'});
+        }
+        if (storedImages.length > ANALYSIS_LIMITS.maxFiles || declaredAnalysisBytes > ANALYSIS_LIMITS.maxTotalBytes) {
+          return json(res,400,{error:'The stored screenshots exceed the analysis limit'});
+        }
+        if (analyses.length) {
+          if (analyses[0].status === 'processing') return json(res,409,{error:'Morning Meeting analysis is already processing'});
+          if (analyses[0].status === 'completed') return json(res,409,{error:'Morning Meeting analysis is already completed'});
+          if (analyses[0].status !== 'failed' || input.retry !== true) {
+            return json(res,409,{error:'Retry is required for a failed analysis'});
+          }
+          analyses = await journalData.retryMorningMeetingAnalysis(
+            analysisMeetingId,
+            user.id,
+            req.auth.accessToken
+          );
+          if (!analyses.length) return json(res,409,{error:'Morning Meeting analysis state changed'});
+        } else {
+          try {
+            analyses = await journalData.createMorningMeetingAnalysis(
+              analysisMeetingId,
+              user.id,
+              req.auth.accessToken
+            );
+          } catch (error) {
+            if (error.code === DATA_API_CONFLICT) {
+              return json(res,409,{error:'Morning Meeting analysis is already processing'});
+            }
+            throw error;
+          }
+        }
+        try {
+          const modelImages = [];
+          let totalBytes = 0;
+          for (const image of storedImages) {
+            const bytes = await journalData.downloadMorningMeetingImage(
+              config.morningMeetingStorageBucket,
+              image.storage_path,
+              req.auth.accessToken
+            );
+            totalBytes += bytes.length;
+            if (bytes.length !== Number(image.size_bytes) ||
+                bytes.length > IMAGE_LIMITS.maxFileBytes ||
+                totalBytes > ANALYSIS_LIMITS.maxTotalBytes ||
+                !imageBytesMatch(image.mime_type, bytes)) {
+              const error = new Error('Stored screenshot validation failed');
+              error.code = 'ANALYSIS_FILE_INVALID';
+              throw error;
+            }
+            modelImages.push({ mime_type:image.mime_type, bytes });
+          }
+          const result = await morningAnalysis.analyze(meetings[0], modelImages);
+          analyses = await journalData.completeMorningMeetingAnalysis(
+            analysisMeetingId,
+            result,
+            user.id,
+            req.auth.accessToken
+          );
+          if (!analyses.length) throw new Error('Analysis state changed before completion');
+          return json(res,200,{ analysis:analyses[0] });
+        } catch (error) {
+          const publicCode = error.code === DATA_API_UNAVAILABLE ? 'ANALYSIS_DATA_UNAVAILABLE' : (error.code || 'ANALYSIS_INTERNAL');
+          const safe = publicCode === 'ANALYSIS_FILE_INVALID'
+            ? { status:400, message:'A stored screenshot is invalid' }
+            : safeAnalysisFailure(publicCode);
+          logger.warn(`Morning Meeting analysis failed: ${publicCode}`);
+          try {
+            await journalData.failMorningMeetingAnalysis(
+              analysisMeetingId,
+              publicCode,
+              safe.message,
+              user.id,
+              req.auth.accessToken
+            );
+          } catch (statusError) {
+            logger.warn('Morning Meeting analysis failed status could not be saved');
+          }
+          return json(res,safe.status,{error:safe.message,code:publicCode});
+        }
+      }
       if (req.method === 'GET' && !meetingId) {
         meetings = await journalData.listMorningMeetings(user.id, req.auth.accessToken);
         images = await journalData.listMorningMeetingImages(meetings.map(item => item.id), user.id, req.auth.accessToken);
@@ -205,24 +402,101 @@ const server = http.createServer(async (req,res)=>{
           return json(res,200,{ meeting:{ ...meetings[0], images, image_count:images.length } });
         }
         if (req.method === 'DELETE') {
+          images = await journalData.listMorningMeetingImages([meetingId], user.id, req.auth.accessToken);
           meetings = await journalData.deleteMorningMeeting(meetingId, user.id, req.auth.accessToken);
           if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+          try {
+            await journalData.removeMorningMeetingImages(
+              config.morningMeetingStorageBucket,
+              images.filter(image => image.storage_path).map(image => image.storage_path),
+              req.auth.accessToken
+            );
+          } catch (cleanupError) {
+            logger.warn('Deleted Morning Meeting screenshot storage cleanup is pending');
+          }
           return json(res,200,{ deleted:true });
+        }
+        currentMeetingAnalysis = await journalData.getMorningMeetingAnalysis(meetingId, user.id, req.auth.accessToken);
+        if (currentMeetingAnalysis.length && currentMeetingAnalysis[0].status === 'processing') {
+          return json(res,409,{error:'Morning Meeting cannot change while analysis is processing'});
+        }
+        if (currentMeetingAnalysis.length) {
+          await journalData.invalidateMorningMeetingAnalysis(
+            meetingId,
+            user.id,
+            req.auth.accessToken
+          );
         }
       }
       input = await body(req);
       validation = validateMorningMeeting(input);
       if (validation.error) return json(res,400,{error:validation.error});
+      if (!meetingId && validation.value.images.some(image => image.id)) {
+        return json(res,400,{error:'Existing screenshots require an existing Morning Meeting'});
+      }
+      if (!meetingId) {
+        const sameDateMeetings = await journalData.getMorningMeetingByDate(
+          validation.value.meeting_date,
+          user.id,
+          req.auth.accessToken
+        );
+        if (sameDateMeetings.length) {
+          currentMeetingAnalysis = await journalData.getMorningMeetingAnalysis(
+            sameDateMeetings[0].id,
+            user.id,
+            req.auth.accessToken
+          );
+          if (currentMeetingAnalysis.length && currentMeetingAnalysis[0].status === 'processing') {
+            return json(res,409,{error:'Morning Meeting cannot change while analysis is processing'});
+          }
+          if (currentMeetingAnalysis.length) {
+            await journalData.invalidateMorningMeetingAnalysis(
+              sameDateMeetings[0].id,
+              user.id,
+              req.auth.accessToken
+            );
+          }
+        }
+      }
+      if (meetingId) {
+        previousImages = await journalData.listMorningMeetingImages([meetingId], user.id, req.auth.accessToken);
+        const previousIds = new Set(previousImages.map(image => image.id));
+        if (validation.value.images.some(image => image.id && !previousIds.has(image.id))) {
+          return json(res,400,{error:'A screenshot does not belong to this Morning Meeting'});
+        }
+      }
       meetings = meetingId
         ? await journalData.updateMorningMeeting(meetingId, validation.value, user.id, req.auth.accessToken)
         : await journalData.upsertMorningMeeting(validation.value, user.id, req.auth.accessToken);
       if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+      if (!meetingId) {
+        previousImages = await journalData.listMorningMeetingImages(
+          [meetings[0].id],
+          user.id,
+          req.auth.accessToken
+        );
+      }
+      const retainedImageIds = new Set(validation.value.images.filter(image => image.id).map(image => image.id));
+      const removedStoragePaths = previousImages
+        .filter(image => image.storage_path && !retainedImageIds.has(image.id))
+        .map(image => image.storage_path);
       images = await journalData.replaceMorningMeetingImages(
         meetings[0].id,
         validation.value.images,
         user.id,
         req.auth.accessToken
       );
+      if (removedStoragePaths.length) {
+        try {
+          await journalData.removeMorningMeetingImages(
+            config.morningMeetingStorageBucket,
+            removedStoragePaths,
+            req.auth.accessToken
+          );
+        } catch (cleanupError) {
+          logger.warn('Removed Morning Meeting screenshot storage cleanup is pending');
+        }
+      }
       return json(res,200,{
         meeting:{ ...meetings[0], images, image_count:images.length },
         screenshot_storage:'metadata_only'
@@ -327,6 +601,7 @@ const server = http.createServer(async (req,res)=>{
     const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.webmanifest':'application/manifest+json; charset=utf-8'};
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
   } catch(e) {
+    if (e.code === 'PAYLOAD_TOO_LARGE') return json(res,413,{error:'Screenshot exceeds the file size limit'});
     if (e.code === DATA_API_UNAVAILABLE) {
       logger.warn(`Private data service unavailable: ${req.method} ${url.pathname}`);
       return json(res,503,{
@@ -371,5 +646,8 @@ module.exports = {
   isJournalRequest,
   journalDateFromPath,
   isMorningMeetingRequest,
-  morningMeetingIdFromPath
+  morningMeetingIdFromPath,
+  morningMeetingAnalysisIdFromPath,
+  morningMeetingImageContentFromPath,
+  binaryBody
 };

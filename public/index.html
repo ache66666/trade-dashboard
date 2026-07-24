@@ -38,7 +38,7 @@
         <p class="private-note">Private: only you can access your screenshots and notes.</p>
         <p class="legal-note">上传内容仅用于你的个人分析和学习。请确保你有权使用相关截图，不要上传或传播受限制、保密或不允许外传的内容。</p>
       </div>
-      <div class="morning-status" id="morningStatus" role="status">Select screenshots to begin. Screenshot files are previewed locally and are not permanently saved in this MVP.</div>
+      <div class="morning-status" id="morningStatus" role="status">Select screenshots to begin. Files are stored privately after you save the meeting.</div>
       <div class="screenshot-preview" id="morningPreview" aria-live="polite"></div>
       <form class="morning-form" id="morningForm">
         <div class="morning-form-head"><div><p class="eyebrow">YOUR PRIVATE VIEW</p><h2>Morning Meeting</h2></div><small id="morningSaveState">Not saved</small></div>
@@ -52,7 +52,18 @@
           <label class="span-two">My View<textarea name="my_view" maxlength="4000" rows="5" required placeholder="Write your current market judgment."></textarea></label>
           <label class="span-two">Review Notes<textarea name="review_notes" maxlength="4000" rows="3" placeholder="Return later and record what changed."></textarea></label>
         </div>
-        <div class="analysis-placeholder"><b>AI analysis: not configured</b><span>AI screenshot analysis will be added in the next phase.</span></div>
+        <section class="morning-analysis" id="morningAnalysis">
+          <div class="morning-analysis-head"><div><p class="eyebrow">PRIVATE ANALYSIS</p><h3>Screenshot Analysis</h3></div><small id="analysisCompletedAt"></small></div>
+          <div class="analysis-state" id="analysisState">Save a meeting with at least one stored screenshot to analyze it.</div>
+          <p class="analysis-disclosure">Analyze is manual. When selected, stored screenshots are sent by the server to the configured model provider for this analysis.</p>
+          <div class="analysis-actions"><button type="button" id="morningAnalyzeButton" disabled>Analyze</button><button type="button" id="morningRetryButton" hidden>Retry</button></div>
+          <div id="analysisResult" hidden>
+            <details><summary>Extracted source text</summary><pre id="analysisExtractedText"></pre></details>
+            <div class="structured-analysis" id="analysisStructuredData"></div>
+            <article class="market-analysis"><h4>Market analysis</h4><div id="analysisText"></div></article>
+            <div class="analysis-warning" id="analysisWarning" hidden>Low-confidence items need manual verification. Model inference is not source fact.</div>
+          </div>
+        </section>
         <div class="morning-actions"><span id="morningError"></span><button class="primary" id="morningSaveButton" type="submit">Save Private Meeting</button></div>
       </form>
     </section>

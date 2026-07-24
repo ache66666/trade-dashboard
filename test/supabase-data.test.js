@@ -131,3 +131,135 @@ test('Morning Meeting update and delete require both record and verified user', 
     assert.equal(url.searchParams.get('user_id'), 'eq.user-a');
   }
 });
+
+test('Morning Meeting storage forwards only the verified token and publishable key', async () => {
+  const calls = [];
+  const bytes = Buffer.from([137,80,78,71,13,10,26,10]);
+  const client = createSupabaseDataClient({
+    config,
+    fetchImpl:async function (url, options) {
+      calls.push({ url:String(url), options });
+      if (options.method === 'GET') {
+        return {
+          ok:true,
+          status:200,
+          arrayBuffer:async function () { return bytes; }
+        };
+      }
+      return response(200, {});
+    }
+  });
+  await client.uploadMorningMeetingImage(
+    'morning-meeting-images',
+    'user-a/meeting-a/image-a.png',
+    bytes,
+    'image/png',
+    'verified-token'
+  );
+  const downloaded = await client.downloadMorningMeetingImage(
+    'morning-meeting-images',
+    'user-a/meeting-a/image-a.png',
+    'verified-token'
+  );
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer verified-token');
+  assert.equal(calls[0].options.headers.apikey, config.supabasePublishableKey);
+  assert.equal(calls[0].options.headers['x-upsert'], 'true');
+  assert.match(calls[1].url, /\/storage\/v1\/object\/authenticated\/morning-meeting-images\//);
+  assert.deepEqual(downloaded, bytes);
+});
+
+test('analysis writes derive ownership only from the verified user', async () => {
+  const calls = [];
+  const client = createSupabaseDataClient({
+    config,
+    fetchImpl:async function (url, options) {
+      const parsed = options.body ? JSON.parse(options.body) : null;
+      calls.push({ url:String(url), options, parsed });
+      return response(200, parsed ? [parsed] : []);
+    }
+  });
+  await client.createMorningMeetingAnalysis('meeting-a', 'verified-user', 'verified-token');
+  await client.completeMorningMeetingAnalysis('meeting-a', {
+    user_id:'attacker',
+    extracted_text:'source',
+    structured_data:{ rates:[] },
+    analysis_text:'analysis',
+    model_provider:'openai',
+    model_name:'test',
+    prompt_version:'v1'
+  }, 'verified-user', 'verified-token');
+  assert.equal(calls[0].parsed.user_id, 'verified-user');
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[1].parsed, 'user_id'), false);
+  assert.equal(new URL(calls[1].url).searchParams.get('user_id'), 'eq.verified-user');
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer verified-token');
+});
+
+test('failed analysis retry is atomic and restricted to the failed state', async () => {
+  let call;
+  const client = createSupabaseDataClient({
+    config,
+    fetchImpl:async function (url, options) {
+      call = { url:String(url), options, parsed:JSON.parse(options.body) };
+      return response(200, []);
+    }
+  });
+  await client.retryMorningMeetingAnalysis('meeting-a', 'user-a', 'token-a');
+  const url = new URL(call.url);
+  assert.equal(call.options.method, 'PATCH');
+  assert.equal(url.searchParams.get('meeting_id'), 'eq.meeting-a');
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-a');
+  assert.equal(url.searchParams.get('status'), 'eq.failed');
+  assert.equal(call.parsed.status, 'processing');
+});
+
+test('editing a meeting preserves owned stored images and deletes only removed metadata', async () => {
+  const calls = [];
+  const stored = {
+    id:'22222222-2222-4222-8222-222222222222',
+    meeting_id:'11111111-1111-4111-8111-111111111111',
+    original_filename:'stored.png',
+    mime_type:'image/png',
+    size_bytes:100,
+    storage_path:'user-a/meeting-a/image-a.png',
+    upload_status:'stored'
+  };
+  const removed = { ...stored, id:'33333333-3333-4333-8333-333333333333', original_filename:'removed.png' };
+  const client = createSupabaseDataClient({
+    config,
+    fetchImpl:async function (url, options) {
+      calls.push({ url:String(url), options, parsed:options.body ? JSON.parse(options.body) : null });
+      if (!options.method || options.method === 'GET') return response(200, [stored, removed]);
+      if (options.method === 'DELETE') return response(204);
+      return response(200, []);
+    }
+  });
+  const rows = await client.replaceMorningMeetingImages(
+    stored.meeting_id,
+    [{ id:stored.id, original_filename:stored.original_filename, mime_type:stored.mime_type, size_bytes:stored.size_bytes }],
+    'user-a',
+    'token-a'
+  );
+  assert.deepEqual(rows, [stored]);
+  assert.equal(calls[1].options.method, 'DELETE');
+  assert.equal(new URL(calls[1].url).searchParams.get('id'), `in.(${removed.id})`);
+  assert.equal(calls.some(call => call.options.method === 'POST'), false);
+});
+
+test('editing a source invalidates only the owner analysis and never accepts client identity', async () => {
+  let call;
+  const client = createSupabaseDataClient({
+    config,
+    fetchImpl:async function (url, options) {
+      call = { url:String(url), options, parsed:JSON.parse(options.body) };
+      return response(200, []);
+    }
+  });
+  await client.invalidateMorningMeetingAnalysis('meeting-a', 'user-a', 'token-a');
+  const url = new URL(call.url);
+  assert.equal(url.searchParams.get('meeting_id'), 'eq.meeting-a');
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-a');
+  assert.equal(url.searchParams.get('status'), 'in.(completed,failed)');
+  assert.equal(call.parsed.status, 'failed');
+  assert.equal(call.parsed.error_code, 'ANALYSIS_SOURCE_CHANGED');
+  assert.equal(Object.prototype.hasOwnProperty.call(call.parsed, 'user_id'), false);
+});

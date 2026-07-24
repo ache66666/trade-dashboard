@@ -81,6 +81,7 @@ const databaseUrl = process.env.DATABASE_URL;
 const editorWriteEnabled = appEnv === 'staging' && booleanValue('EDITOR_WRITE_ENABLED', false);
 const runtime = getRuntimeInfo(process.env);
 const auth = authConfiguration(appEnv, databaseUrl);
+const morningAnalysisTimeoutMs = positiveInteger('MORNING_ANALYSIS_TIMEOUT_MS', 45000);
 
 if (!databaseUrl) throw new Error('缺少 DATABASE_URL，无法连接 PostgreSQL');
 
@@ -93,6 +94,10 @@ module.exports = Object.freeze({
   authConfigured:auth.configured,
   supabaseUrl:auth.url,
   supabasePublishableKey:auth.key,
+  morningAnalysisApiKey:String(process.env.OPENAI_API_KEY || '').trim(),
+  morningAnalysisModel:String(process.env.MORNING_ANALYSIS_MODEL || 'gpt-5.4-mini').trim(),
+  morningAnalysisTimeoutMs,
+  morningMeetingStorageBucket:String(process.env.MORNING_MEETING_STORAGE_BUCKET || 'morning-meeting-images').trim(),
   logLevel: String(process.env.LOG_LEVEL || 'info').trim().toLowerCase(),
   port: positiveInteger('PORT', 4173),
   databasePoolMax: positiveInteger('DATABASE_POOL_MAX', 10),

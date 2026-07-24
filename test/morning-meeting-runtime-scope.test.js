@@ -37,3 +37,22 @@ test('missing or foreign records use a generic not-found response', () => {
   assert.match(server, /\{error:'Morning Meeting not found'\}/);
   assert.doesNotMatch(server, /belongs to another user|other user|foreign owner/i);
 });
+
+test('analysis and image routes authenticate before body, storage, or model access', () => {
+  const route = server.indexOf('if (isMorningMeetingRequest(req, url))');
+  const auth = server.indexOf('await requireAuth(req, res', route);
+  const imageRoute = server.indexOf('if (imageContent)', auth);
+  const analysisRoute = server.indexOf('if (analysisMeetingId)', imageRoute);
+  assert.ok(auth > route && imageRoute > auth && analysisRoute > auth);
+  assert.ok(server.indexOf('await binaryBody(req', imageRoute) > auth);
+  assert.ok(server.indexOf('await body(req)', analysisRoute) > auth);
+  assert.ok(server.indexOf('morningAnalysis.analyze', analysisRoute) > auth);
+});
+
+test('analysis runtime never writes public market or Journal data', () => {
+  const start = server.indexOf('if (analysisMeetingId)');
+  const end = server.indexOf("if (req.method === 'GET' && !meetingId)", start);
+  const section = server.slice(start, end);
+  assert.doesNotMatch(section, /updateMarket|indicators|macro_events|daily_market_notes|journalData\.upsertDailyNote/);
+  assert.doesNotMatch(section, /req\.(?:body|query)\.user_id|x-user-id/i);
+});

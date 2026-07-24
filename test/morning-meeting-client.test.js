@@ -27,13 +27,24 @@ test('Morning client uses only Node API and never submits user identity', () => 
 test('Morning upload UX supports multiple safe image types and private messaging', () => {
   assert.match(html, /id="morningScreenshots"[^>]+accept="image\/jpeg,image\/png,image\/webp"[^>]+multiple/);
   assert.match(html, /Private: only you can access your screenshots and notes/);
-  assert.match(html, /截图文件.*不永久|not permanently saved/i);
+  assert.match(html, /stored privately after you save/i);
   assert.doesNotMatch(html, />\s*(?:Share|Publish|Community|Copy public link)\s*</i);
   assert.match(client, /FileReader/);
   assert.match(client, /bytesMatch/);
   assert.match(client, /window\.URL\.revokeObjectURL/);
   assert.match(client, /addEventListener\('pagehide', clearPreviewUrls/);
   assert.match(client, /addEventListener\('beforeunload', clearPreviewUrls/);
+});
+
+test('Morning analysis UI is manual, status-aware, and never exposes provider configuration', () => {
+  assert.match(html, /id="morningAnalyzeButton"/);
+  assert.match(html, /id="morningRetryButton"/);
+  assert.match(html, /id="analysisExtractedText"/);
+  assert.match(html, /id="analysisStructuredData"/);
+  assert.match(html, /id="analysisText"/);
+  assert.match(client, /\/analysis/);
+  assert.match(client, /uploadSelectedFiles/);
+  assert.doesNotMatch(client + html, /OPENAI_API_KEY|sk-[A-Za-z0-9]|api\.openai\.com/);
 });
 
 test('PWA manifest is installable and identifies Market Coach', () => {
