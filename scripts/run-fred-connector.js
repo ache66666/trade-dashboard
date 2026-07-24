@@ -1,6 +1,6 @@
 'use strict';
 
-const { ALLOW_LIST } = require('../connectors/fred/catalog');
+const { ALLOW_LIST, DEFAULT_SYMBOLS } = require('../connectors/fred/catalog');
 const { assertProductionSafety, WRITE_CONFIRMATION } = require('../connectors/fred/production-safety');
 const { safeStage, stageFailure } = require('../connectors/fred/runner');
 
@@ -21,7 +21,7 @@ function parseArguments(argumentsList) {
   return {
     dryRun:!apply,
     confirmation:confirmations.length ? confirmations[0].slice('--confirm='.length) : '',
-    symbols:indicator ? [indicator] : ALLOW_LIST
+    symbols:indicator ? [indicator] : DEFAULT_SYMBOLS
   };
 }
 

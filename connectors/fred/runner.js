@@ -1,6 +1,6 @@
 'use strict';
 
-const { ALLOW_LIST, getIndicatorDefinition } = require('./catalog');
+const { ALLOW_LIST, DEFAULT_SYMBOLS, getIndicatorDefinition } = require('./catalog');
 const { fetchFredCsv } = require('./fetcher');
 const { adaptFredCsv } = require('./adapter');
 const { validateRecord } = require('./validator');
@@ -72,7 +72,7 @@ function connectorFailure(code) {
 }
 
 function selectedSymbols(value) {
-  const symbols = value === undefined ? ALLOW_LIST : value;
+  const symbols = value === undefined ? DEFAULT_SYMBOLS : value;
   if (!Array.isArray(symbols) || symbols.length === 0 ||
       new Set(symbols).size !== symbols.length || symbols.some(symbol => !ALLOW_LIST.includes(symbol))) {
     throw connectorFailure('FRED_INDICATOR_SELECTION_INVALID');
