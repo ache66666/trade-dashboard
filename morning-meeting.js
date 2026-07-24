@@ -39,6 +39,7 @@ function cleanText(value, maxLength) {
 function validateImageMetadata(images) {
   let totalBytes = 0;
   const normalized = [];
+  const identities = new Set();
   if (!Array.isArray(images)) return { error:'Screenshots must be an array' };
   if (images.length > IMAGE_LIMITS.maxFiles) return { error:`A maximum of ${IMAGE_LIMITS.maxFiles} screenshots is allowed` };
   for (const image of images) {
@@ -57,8 +58,14 @@ function validateImageMetadata(images) {
     if (!Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > IMAGE_LIMITS.maxFileBytes) {
       return { error:'A screenshot exceeds the file size limit' };
     }
+    const id = image && image.id === undefined ? null : String(image.id || '');
+    if (id !== null && !validId(id)) return { error:'A screenshot identifier is invalid' };
+    const identity = `${originalFilename}\n${mimeType}\n${sizeBytes}`;
+    if (identities.has(identity)) return { error:'Duplicate screenshot files are not allowed' };
+    identities.add(identity);
     totalBytes += sizeBytes;
     normalized.push({
+      ...(id ? { id } : {}),
       original_filename:originalFilename,
       mime_type:mimeType,
       size_bytes:sizeBytes,
@@ -68,6 +75,20 @@ function validateImageMetadata(images) {
   }
   if (totalBytes > IMAGE_LIMITS.maxTotalBytes) return { error:'The selected screenshots exceed the total size limit' };
   return { value:normalized };
+}
+
+function imageBytesMatch(mimeType, bytes) {
+  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) return false;
+  if (mimeType === 'image/jpeg') return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (mimeType === 'image/png') {
+    return bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 &&
+      bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10;
+  }
+  if (mimeType === 'image/webp') {
+    return bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70 &&
+      bytes[8] === 87 && bytes[9] === 69 && bytes[10] === 66 && bytes[11] === 80;
+  }
+  return false;
 }
 
 function validateMorningMeeting(input) {
@@ -113,6 +134,7 @@ module.exports = {
   validDate,
   validId,
   validateImageMetadata,
+  imageBytesMatch,
   validateMorningMeeting,
   analyzeMarketScreenshots
 };

@@ -15,6 +15,8 @@ let authCalls = 0;
 let dataApiCalls = 0;
 let lastDataApiRequest = null;
 let lastMeetingWriteBody = null;
+let analysisRow = null;
+let failAnalysisComplete = false;
 let queryCalls = 0;
 let server;
 let baseUrl;
@@ -48,15 +50,76 @@ before(async () => {
   process.env.DATABASE_URL = SAFE_DATABASE_URL;
   process.env.SUPABASE_URL = 'https://test.supabase.co';
   process.env.SUPABASE_PUBLISHABLE_KEY = PUBLIC_KEY;
+  process.env.OPENAI_API_KEY = 'test-model-key';
 
   global.fetch = async function (url, options) {
     const token = String(options.headers.Authorization || '').replace(/^Bearer\s+/i, '');
+    if (String(url) === 'https://api.openai.com/v1/responses') {
+      return authResponse(200, {
+        output_text:JSON.stringify({
+          extracted_text:'US10Y 4.2%',
+          structured_data:{
+            meeting_date:null,
+            title:'Test',
+            source:'Screenshot',
+            market_summary:'Test summary',
+            rates:[{ name:'US10Y', value:4.2, unit:'%', change:null, direction:'unknown', comment:'Fact', source_text:'US10Y 4.2%', confidence:0.9 }],
+            fx:[], equities:[], commodities:[], credit:[], events:[], risks:[], trade_ideas:[], uncertain_items:[]
+          },
+          analysis_text:'1. 今日市场在交易什么\n测试\n2. 国内利率与资金面\n测试\n3. 海外利率与汇率\n测试\n4. 股票、商品与风险偏好\n测试\n5. 关键事件和催化剂\n测试\n6. 数据支持的结论\n测试\n7. 尚未得到验证的判断\n测试\n8. 今日继续观察的问题\n测试'
+        })
+      });
+    }
+    if (String(url).includes('/storage/v1/object/authenticated/')) {
+      const bytes = Buffer.from([137,80,78,71,13,10,26,10]);
+      return { ok:true, status:200, arrayBuffer:async function () { return bytes; } };
+    }
     if (String(url).startsWith('https://test.supabase.co/rest/v1/')) {
       dataApiCalls += 1;
       lastDataApiRequest = { url:String(url), options };
       assert.equal(options.headers.apikey, PUBLIC_KEY);
       if (token === 'data-error') return authResponse(500, { message:'RAW_DATA_INTERNAL' });
       if (String(url).includes('/indicators')) return authResponse(200, [{ symbol:'TEST' }]);
+      if (String(url).includes('/morning_meeting_analyses')) {
+        if (options.method === 'POST') {
+          analysisRow = { id:'33333333-3333-4333-8333-333333333333', ...JSON.parse(options.body) };
+          return authResponse(200, [analysisRow]);
+        }
+        if (options.method === 'PATCH') {
+          const update = JSON.parse(options.body);
+          if (failAnalysisComplete && update.status === 'completed') return authResponse(500, { message:'RAW_ANALYSIS_SAVE_ERROR' });
+          analysisRow = { ...analysisRow, ...update };
+          const safeRow = { ...analysisRow };
+          delete safeRow.user_id;
+          return authResponse(200, [safeRow]);
+        }
+        return authResponse(200, analysisRow ? [analysisRow] : []);
+      }
+      if (String(url).includes('/morning_meeting_images') && options.method === 'GET') {
+        return authResponse(200, [{
+          id:'22222222-2222-4222-8222-222222222222',
+          meeting_id:'11111111-1111-4111-8111-111111111111',
+          original_filename:'market.png',
+          mime_type:'image/png',
+          size_bytes:8,
+          storage_path:'user-123/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.png',
+          upload_status:'stored'
+        }]);
+      }
+      if (String(url).includes('/morning_meetings') && (!options.method || options.method === 'GET')) {
+        const parsed = new URL(String(url));
+        if (parsed.searchParams.get('id') === 'eq.11111111-1111-4111-8111-111111111111' &&
+            parsed.searchParams.get('user_id') === 'eq.user-123') {
+          return authResponse(200, [{
+            id:'11111111-1111-4111-8111-111111111111',
+            meeting_date:'2026-07-24',
+            primary_driver:'Liquidity',
+            confidence:55,
+            my_view:'Private view'
+          }]);
+        }
+        return authResponse(200, []);
+      }
       if (String(url).includes('/morning_meetings') && (options.method === 'POST' || options.method === 'PATCH')) {
         lastMeetingWriteBody = JSON.parse(options.body);
         return authResponse(200, [{
@@ -298,7 +361,10 @@ for (const endpoint of [
   ['POST', '/api/morning-meetings'],
   ['GET', '/api/morning-meetings/11111111-1111-4111-8111-111111111111'],
   ['PUT', '/api/morning-meetings/11111111-1111-4111-8111-111111111111'],
-  ['DELETE', '/api/morning-meetings/11111111-1111-4111-8111-111111111111']
+  ['DELETE', '/api/morning-meetings/11111111-1111-4111-8111-111111111111'],
+  ['GET', '/api/morning-meetings/11111111-1111-4111-8111-111111111111/analysis'],
+  ['POST', '/api/morning-meetings/11111111-1111-4111-8111-111111111111/analysis'],
+  ['PUT', '/api/morning-meetings/11111111-1111-4111-8111-111111111111/images/22222222-2222-4222-8222-222222222222/content']
 ]) {
   test(`anonymous Morning Meeting ${endpoint[0]} is rejected before private data access`, async () => {
     const beforeData = dataApiCalls;
@@ -388,6 +454,37 @@ test('Morning Meeting Data API errors are mapped to a sanitized 503', async () =
   assert.equal(response.status, 503);
   assert.deepEqual(response.json, { error:'Morning Meeting service unavailable' });
   assert.doesNotMatch(response.text, /RAW_|token|supabase|stack|postgres/i);
+});
+
+test('authenticated user can analyze only an owned stored screenshot', async () => {
+  analysisRow = null;
+  failAnalysisComplete = false;
+  const response = await request(
+    'POST',
+    '/api/morning-meetings/11111111-1111-4111-8111-111111111111/analysis?user_id=attacker',
+    'Bearer valid-token',
+    { user_id:'attacker', retry:false },
+    { 'X-User-Id':'attacker' }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.json.analysis.status, 'completed');
+  assert.equal(response.json.analysis.structured_data.rates[0].name, 'US10Y');
+  assert.equal(Object.prototype.hasOwnProperty.call(response.json.analysis, 'user_id'), false);
+});
+
+test('analysis database save failure is sanitized and does not expose upstream details', async () => {
+  analysisRow = null;
+  failAnalysisComplete = true;
+  const response = await request(
+    'POST',
+    '/api/morning-meetings/11111111-1111-4111-8111-111111111111/analysis',
+    'Bearer valid-token',
+    { retry:false }
+  );
+  failAnalysisComplete = false;
+  assert.equal(response.status, 503);
+  assert.equal(response.json.code, 'ANALYSIS_DATA_UNAVAILABLE');
+  assert.doesNotMatch(response.text, /RAW_|token|supabase|stack|postgres|test-model-key/i);
 });
 
 for (const endpoint of ['/api/health', '/api/dashboard', '/api/dashboard-compat', '/api/indicators', '/api/events']) {

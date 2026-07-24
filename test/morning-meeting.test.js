@@ -62,7 +62,11 @@ test('screenshot metadata enforces count and size limits', () => {
   const image = { original_filename:'market.jpg', mime_type:'image/jpeg', size_bytes:1024 };
   assert.match(validateImageMetadata(Array(IMAGE_LIMITS.maxFiles + 1).fill(image)).error, /maximum/i);
   assert.match(validateImageMetadata([{ ...image, size_bytes:IMAGE_LIMITS.maxFileBytes + 1 }]).error, /size/i);
-  assert.match(validateImageMetadata(Array(7).fill({ ...image, size_bytes:9 * 1024 * 1024 })).error, /total/i);
+  assert.match(validateImageMetadata(Array.from({ length:7 }, (unused, index) => ({
+    ...image,
+    original_filename:`market-${index}.jpg`,
+    size_bytes:9 * 1024 * 1024
+  }))).error, /total/i);
 });
 
 test('screenshot metadata rejects unsafe MIME, extension, and path names', () => {
@@ -77,6 +81,17 @@ test('screenshot metadata rejects unsafe MIME, extension, and path names', () =>
   ]) {
     assert.ok(validateImageMetadata([image]).error, image.original_filename);
   }
+});
+
+test('screenshot metadata accepts only valid existing IDs and rejects duplicate files', () => {
+  const image = { original_filename:'market.png', mime_type:'image/png', size_bytes:100 };
+  assert.match(validateImageMetadata([{ ...image, id:'attacker' }]).error, /identifier/i);
+  assert.match(validateImageMetadata([image, image]).error, /duplicate/i);
+  const valid = validateImageMetadata([{
+    ...image,
+    id:'22222222-2222-4222-8222-222222222222'
+  }]);
+  assert.equal(valid.value[0].id, '22222222-2222-4222-8222-222222222222');
 });
 
 test('AI analysis remains an explicit non-configured boundary', () => {
