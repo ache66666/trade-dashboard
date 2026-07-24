@@ -29,8 +29,10 @@ test('both private tables enforce Auth ownership and RLS', () => {
 });
 
 test('anonymous and public access is revoked and no sharing fields exist', () => {
-  assert.match(sql, /REVOKE ALL PRIVILEGES ON public\.morning_meetings FROM PUBLIC, anon, service_role/);
-  assert.match(sql, /REVOKE ALL PRIVILEGES ON public\.morning_meeting_images FROM PUBLIC, anon, service_role/);
+  assert.match(sql, /REVOKE ALL PRIVILEGES ON public\.morning_meetings\s+FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(sql, /REVOKE ALL PRIVILEGES ON public\.morning_meeting_images\s+FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(sql, /GRANT SELECT, INSERT, UPDATE, DELETE ON public\.morning_meetings TO authenticated/);
+  assert.match(sql, /GRANT SELECT, INSERT, UPDATE, DELETE ON public\.morning_meeting_images TO authenticated/);
   assert.doesNotMatch(sql, /is_public|public_url|share_token|visibility/i);
 });
 

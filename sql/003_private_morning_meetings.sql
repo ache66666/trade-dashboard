@@ -128,8 +128,10 @@ CREATE POLICY morning_meeting_images_delete_own
   ON public.morning_meeting_images FOR DELETE TO authenticated
   USING (auth.uid() = user_id);
 
-REVOKE ALL PRIVILEGES ON public.morning_meetings FROM PUBLIC, anon, service_role;
-REVOKE ALL PRIVILEGES ON public.morning_meeting_images FROM PUBLIC, anon, service_role;
+REVOKE ALL PRIVILEGES ON public.morning_meetings
+  FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL PRIVILEGES ON public.morning_meeting_images
+  FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.morning_meetings TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.morning_meeting_images TO authenticated;
 
