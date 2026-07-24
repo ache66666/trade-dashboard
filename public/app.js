@@ -184,7 +184,16 @@
     var i;
     for (i = 0; i < navs.length; i += 1) navs[i].className = navs[i].getAttribute('data-page') === page ? 'nav active' : 'nav';
     for (i = 0; i < pages.length; i += 1) pages[i].className = pages[i].id === page ? 'page active' : 'page';
-    byId('pageTitle').textContent = page === 'overview' ? '市场总览' : page === 'journal' ? '交易日志' : page === 'details' ? '详细数据' : '数据维护';
+    byId('pageTitle').textContent = page === 'morning' ? 'Morning Meeting' : page === 'overview' ? 'Markets' : page === 'journal' ? 'Journal' : page === 'details' ? 'Details' : '数据维护';
+    byId('pageDesc').textContent = page === 'morning'
+      ? 'Turn today’s market screenshots into a clear, reviewable judgment.'
+      : page === 'overview'
+        ? '用最少的数据，看清今天的市场方向。'
+        : page === 'journal'
+          ? 'Review only your own private market records.'
+          : page === 'details'
+            ? 'Explore the existing market dataset.'
+            : '维护公共市场数据。';
   }
 
   function renderDetails() {

@@ -14,6 +14,7 @@ const events = [{ id:1, name:'Test event' }];
 let authCalls = 0;
 let dataApiCalls = 0;
 let lastDataApiRequest = null;
+let lastMeetingWriteBody = null;
 let queryCalls = 0;
 let server;
 let baseUrl;
@@ -56,6 +57,22 @@ before(async () => {
       assert.equal(options.headers.apikey, PUBLIC_KEY);
       if (token === 'data-error') return authResponse(500, { message:'RAW_DATA_INTERNAL' });
       if (String(url).includes('/indicators')) return authResponse(200, [{ symbol:'TEST' }]);
+      if (String(url).includes('/morning_meetings') && (options.method === 'POST' || options.method === 'PATCH')) {
+        lastMeetingWriteBody = JSON.parse(options.body);
+        return authResponse(200, [{
+          id:'11111111-1111-4111-8111-111111111111',
+          meeting_date:lastMeetingWriteBody.meeting_date,
+          primary_driver:lastMeetingWriteBody.primary_driver,
+          evidence:lastMeetingWriteBody.evidence,
+          contradiction:lastMeetingWriteBody.contradiction,
+          need_to_verify:lastMeetingWriteBody.need_to_verify,
+          confidence:lastMeetingWriteBody.confidence,
+          my_view:lastMeetingWriteBody.my_view,
+          review_notes:lastMeetingWriteBody.review_notes,
+          analysis_status:lastMeetingWriteBody.analysis_status
+        }]);
+      }
+      if (String(url).includes('/morning_meeting_images') && options.method === 'DELETE') return authResponse(204);
       if (options.method === 'POST') return authResponse(200, [JSON.parse(options.body)]);
       return authResponse(options.method === 'DELETE' ? 204 : 200, []);
     }
@@ -63,6 +80,7 @@ before(async () => {
     assert.equal(url, 'https://test.supabase.co/auth/v1/user');
     assert.equal(options.headers.apikey, PUBLIC_KEY);
     if (token === 'valid-token') return authResponse(200, { id:'user-123', email:'trader@example.com', role:'ignored' });
+    if (token === 'valid-token-b') return authResponse(200, { id:'user-456', email:'trader-b@example.com' });
     if (token === 'data-error') return authResponse(200, { id:'user-123', email:'trader@example.com' });
     if (token === 'forbidden-token') return authResponse(403, { message:'RAW_FORBIDDEN' });
     if (token === 'service-error') return authResponse(500, { message:'RAW_AUTH_INTERNAL' });
@@ -272,6 +290,103 @@ test('Journal Data API errors are mapped to sanitized 503', async () => {
   const response = await request('GET', '/api/journal/2098-12-30', 'Bearer data-error');
   assert.equal(response.status, 503);
   assert.deepEqual(response.json, { error:'Journal service unavailable' });
+  assert.doesNotMatch(response.text, /RAW_|token|supabase|stack|postgres/i);
+});
+
+for (const endpoint of [
+  ['GET', '/api/morning-meetings'],
+  ['POST', '/api/morning-meetings'],
+  ['GET', '/api/morning-meetings/11111111-1111-4111-8111-111111111111'],
+  ['PUT', '/api/morning-meetings/11111111-1111-4111-8111-111111111111'],
+  ['DELETE', '/api/morning-meetings/11111111-1111-4111-8111-111111111111']
+]) {
+  test(`anonymous Morning Meeting ${endpoint[0]} is rejected before private data access`, async () => {
+    const beforeData = dataApiCalls;
+    const beforeQueries = queryCalls;
+    const response = await request(
+      endpoint[0],
+      endpoint[1] + '?user_id=attacker',
+      undefined,
+      endpoint[0] === 'POST' || endpoint[0] === 'PUT' ? { user_id:'attacker', malformed:true } : undefined,
+      { 'X-User-Id':'attacker' }
+    );
+    assert.equal(response.status, 401);
+    assert.deepEqual(response.json, { error:'Authentication required' });
+    assert.equal(dataApiCalls, beforeData);
+    assert.equal(queryCalls, beforeQueries);
+  });
+}
+
+test('authenticated Morning Meeting list uses verified identity through Data API', async () => {
+  const beforeQueries = queryCalls;
+  const response = await request('GET', '/api/morning-meetings?user_id=attacker', 'Bearer valid-token', undefined, { 'X-User-Id':'attacker' });
+  const url = new URL(lastDataApiRequest.url);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.json, { meetings:[] });
+  assert.equal(url.pathname, '/rest/v1/morning_meetings');
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-123');
+  assert.equal(queryCalls, beforeQueries);
+});
+
+test('authenticated Morning Meeting create ignores forged user identity', async () => {
+  const beforeQueries = queryCalls;
+  const response = await request(
+    'POST',
+    '/api/morning-meetings?user_id=attacker',
+    'Bearer valid-token',
+    {
+      user_id:'attacker',
+      meeting_date:'2026-07-24',
+      primary_driver:'Liquidity',
+      evidence:'Evidence',
+      contradiction:'',
+      need_to_verify:'',
+      confidence:55,
+      my_view:'Private view',
+      review_notes:'',
+      images:[]
+    },
+    { 'X-User-Id':'attacker' }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(lastMeetingWriteBody.user_id, 'user-123');
+  assert.equal(Object.prototype.hasOwnProperty.call(response.json.meeting, 'user_id'), false);
+  assert.equal(response.json.screenshot_storage, 'metadata_only');
+  assert.equal(queryCalls, beforeQueries);
+});
+
+test('a second user cannot address another user through query, body, or headers', async () => {
+  const foreignId = '11111111-1111-4111-8111-111111111111';
+  const response = await request(
+    'PUT',
+    `/api/morning-meetings/${foreignId}?user_id=user-123`,
+    'Bearer valid-token-b',
+    {
+      user_id:'user-123',
+      meeting_date:'2026-07-24',
+      primary_driver:'Risk',
+      evidence:'',
+      contradiction:'',
+      need_to_verify:'',
+      confidence:30,
+      my_view:'Attempted foreign update',
+      review_notes:'',
+      images:[]
+    },
+    { 'X-User-Id':'user-123' }
+  );
+  const url = new URL(lastDataApiRequest.url);
+  assert.equal(response.status, 404);
+  assert.deepEqual(response.json, { error:'Morning Meeting not found' });
+  assert.equal(url.pathname, '/rest/v1/morning_meetings');
+  assert.equal(url.searchParams.get('id'), `eq.${foreignId}`);
+  assert.equal(url.searchParams.get('user_id'), 'eq.user-456');
+});
+
+test('Morning Meeting Data API errors are mapped to a sanitized 503', async () => {
+  const response = await request('GET', '/api/morning-meetings', 'Bearer data-error');
+  assert.equal(response.status, 503);
+  assert.deepEqual(response.json, { error:'Morning Meeting service unavailable' });
   assert.doesNotMatch(response.text, /RAW_|token|supabase|stack|postgres/i);
 });
 

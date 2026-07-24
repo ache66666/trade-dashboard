@@ -6,6 +6,7 @@ const logger = require('./logger');
 const { handleHealth } = require('./health');
 const { requireAuth } = require('./auth');
 const { validateJournal, validDate } = require('./journal');
+const { validateMorningMeeting, validId } = require('./morning-meeting');
 const { DATA_API_UNAVAILABLE, createSupabaseDataClient } = require('./supabase-data');
 const { getPool, query, closePool } = require('./database');
 
@@ -49,6 +50,14 @@ function journalDateFromPath(pathname) {
 }
 function isJournalRequest(req, url) {
   return ['GET','PUT','DELETE'].includes(req.method) && Boolean(journalDateFromPath(url.pathname));
+}
+function morningMeetingIdFromPath(pathname) {
+  const match = /^\/api\/morning-meetings\/([0-9a-f-]+)$/i.exec(pathname);
+  return match && validId(match[1]) ? match[1] : null;
+}
+function isMorningMeetingRequest(req, url) {
+  if (url.pathname === '/api/morning-meetings') return req.method === 'GET' || req.method === 'POST';
+  return ['GET','PUT','DELETE'].includes(req.method) && Boolean(morningMeetingIdFromPath(url.pathname));
 }
 function body(req) { return new Promise((resolve,reject)=>{ let s=''; req.on('data',c=>{s+=c;if(s.length>1e6)reject(new Error('请求过大'));}); req.on('end',()=>{try{resolve(JSON.parse(s||'{}'))}catch(e){reject(e)}}); }); }
 function validateIndicator(x) {
@@ -169,6 +178,56 @@ const server = http.createServer(async (req,res)=>{
       if (!user) return;
       return json(res,200,user);
     }
+    if (isMorningMeetingRequest(req, url)) {
+      const meetingId = morningMeetingIdFromPath(url.pathname);
+      const user = await requireAuth(req, res, { config, logger, sendJson:json });
+      let meetings;
+      let images;
+      let input;
+      let validation;
+      if (!user) return;
+      if (req.method === 'GET' && !meetingId) {
+        meetings = await journalData.listMorningMeetings(user.id, req.auth.accessToken);
+        images = await journalData.listMorningMeetingImages(meetings.map(item => item.id), user.id, req.auth.accessToken);
+        return json(res,200,{
+          meetings:meetings.map(meeting => ({
+            ...meeting,
+            images:images.filter(image => image.meeting_id === meeting.id),
+            image_count:images.filter(image => image.meeting_id === meeting.id).length
+          }))
+        });
+      }
+      if (meetingId) {
+        meetings = await journalData.getMorningMeeting(meetingId, user.id, req.auth.accessToken);
+        if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+        if (req.method === 'GET') {
+          images = await journalData.listMorningMeetingImages([meetingId], user.id, req.auth.accessToken);
+          return json(res,200,{ meeting:{ ...meetings[0], images, image_count:images.length } });
+        }
+        if (req.method === 'DELETE') {
+          meetings = await journalData.deleteMorningMeeting(meetingId, user.id, req.auth.accessToken);
+          if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+          return json(res,200,{ deleted:true });
+        }
+      }
+      input = await body(req);
+      validation = validateMorningMeeting(input);
+      if (validation.error) return json(res,400,{error:validation.error});
+      meetings = meetingId
+        ? await journalData.updateMorningMeeting(meetingId, validation.value, user.id, req.auth.accessToken)
+        : await journalData.upsertMorningMeeting(validation.value, user.id, req.auth.accessToken);
+      if (!meetings.length) return json(res,404,{error:'Morning Meeting not found'});
+      images = await journalData.replaceMorningMeetingImages(
+        meetings[0].id,
+        validation.value.images,
+        user.id,
+        req.auth.accessToken
+      );
+      return json(res,200,{
+        meeting:{ ...meetings[0], images, image_count:images.length },
+        screenshot_storage:'metadata_only'
+      });
+    }
     if (isJournalRequest(req, url)) {
       const noteDate = journalDateFromPath(url.pathname);
       const user = await requireAuth(req, res, { config, logger, sendJson:json });
@@ -265,12 +324,16 @@ const server = http.createServer(async (req,res)=>{
       res.writeHead(200, {'Content-Type':'text/html; charset=utf-8','Content-Length':buffer.length,'Cache-Control':'no-store'});
       return res.end(buffer);
     }
-    const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
+    const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.webmanifest':'application/manifest+json; charset=utf-8'};
     res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'}); fs.createReadStream(file).pipe(res);
   } catch(e) {
     if (e.code === DATA_API_UNAVAILABLE) {
-      logger.warn(`Journal data service unavailable: ${req.method} ${url.pathname}`);
-      return json(res,503,{error:'Journal service unavailable'});
+      logger.warn(`Private data service unavailable: ${req.method} ${url.pathname}`);
+      return json(res,503,{
+        error:url.pathname.startsWith('/api/morning-meetings')
+          ? 'Morning Meeting service unavailable'
+          : 'Journal service unavailable'
+      });
     }
     if (e.code === '23505') return json(res,409,{error:'代码已存在'});
     logger.error(`API request failed: ${req.method} ${url.pathname}: ${e.message}`);
@@ -300,4 +363,13 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, start, shutdown, isEditorWriteRequest, isJournalRequest, journalDateFromPath };
+module.exports = {
+  server,
+  start,
+  shutdown,
+  isEditorWriteRequest,
+  isJournalRequest,
+  journalDateFromPath,
+  isMorningMeetingRequest,
+  morningMeetingIdFromPath
+};

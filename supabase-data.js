@@ -115,7 +115,136 @@ function createSupabaseDataClient(options) {
     });
   }
 
-  return Object.freeze({ getDailyNote, findIndicatorSymbols, upsertDailyNote, deleteDailyNote });
+  function listMorningMeetings(userId, accessToken) {
+    return request('morning_meetings', {
+      accessToken,
+      query:{
+        select:'id,meeting_date,primary_driver,evidence,contradiction,need_to_verify,confidence,my_view,review_notes,analysis_status,created_at,updated_at',
+        user_id:`eq.${userId}`,
+        order:'meeting_date.desc,updated_at.desc'
+      }
+    });
+  }
+
+  function getMorningMeeting(meetingId, userId, accessToken) {
+    return request('morning_meetings', {
+      accessToken,
+      query:{
+        select:'id,meeting_date,primary_driver,evidence,contradiction,need_to_verify,confidence,my_view,review_notes,analysis_status,created_at,updated_at',
+        id:`eq.${meetingId}`,
+        user_id:`eq.${userId}`,
+        limit:'1'
+      }
+    });
+  }
+
+  function listMorningMeetingImages(meetingIds, userId, accessToken) {
+    if (!meetingIds.length) return Promise.resolve([]);
+    return request('morning_meeting_images', {
+      accessToken,
+      query:{
+        select:'id,meeting_id,original_filename,mime_type,size_bytes,upload_status,created_at',
+        meeting_id:`in.(${meetingIds.join(',')})`,
+        user_id:`eq.${userId}`,
+        order:'created_at.asc'
+      }
+    });
+  }
+
+  function upsertMorningMeeting(meeting, userId, accessToken) {
+    return request('morning_meetings', {
+      method:'POST',
+      accessToken,
+      query:{ on_conflict:'user_id,meeting_date', select:'id,meeting_date,primary_driver,evidence,contradiction,need_to_verify,confidence,my_view,review_notes,analysis_status,created_at,updated_at' },
+      prefer:'resolution=merge-duplicates,return=representation',
+      body:{
+        user_id:userId,
+        meeting_date:meeting.meeting_date,
+        primary_driver:meeting.primary_driver,
+        evidence:meeting.evidence,
+        contradiction:meeting.contradiction,
+        need_to_verify:meeting.need_to_verify,
+        confidence:meeting.confidence,
+        my_view:meeting.my_view,
+        review_notes:meeting.review_notes,
+        analysis_status:'not_configured',
+        updated_at:new Date().toISOString()
+      }
+    });
+  }
+
+  function updateMorningMeeting(meetingId, meeting, userId, accessToken) {
+    return request('morning_meetings', {
+      method:'PATCH',
+      accessToken,
+      query:{
+        id:`eq.${meetingId}`,
+        user_id:`eq.${userId}`,
+        select:'id,meeting_date,primary_driver,evidence,contradiction,need_to_verify,confidence,my_view,review_notes,analysis_status,created_at,updated_at'
+      },
+      prefer:'return=representation',
+      body:{
+        meeting_date:meeting.meeting_date,
+        primary_driver:meeting.primary_driver,
+        evidence:meeting.evidence,
+        contradiction:meeting.contradiction,
+        need_to_verify:meeting.need_to_verify,
+        confidence:meeting.confidence,
+        my_view:meeting.my_view,
+        review_notes:meeting.review_notes,
+        analysis_status:'not_configured',
+        updated_at:new Date().toISOString()
+      }
+    });
+  }
+
+  async function replaceMorningMeetingImages(meetingId, images, userId, accessToken) {
+    await request('morning_meeting_images', {
+      method:'DELETE',
+      accessToken,
+      query:{ meeting_id:`eq.${meetingId}`, user_id:`eq.${userId}` },
+      prefer:'return=minimal'
+    });
+    if (!images.length) return [];
+    return request('morning_meeting_images', {
+      method:'POST',
+      accessToken,
+      query:{ select:'id,meeting_id,original_filename,mime_type,size_bytes,upload_status,created_at' },
+      prefer:'return=representation',
+      body:images.map(image => ({
+        user_id:userId,
+        meeting_id:meetingId,
+        storage_path:null,
+        original_filename:image.original_filename,
+        mime_type:image.mime_type,
+        size_bytes:image.size_bytes,
+        upload_status:'metadata_only'
+      }))
+    });
+  }
+
+  function deleteMorningMeeting(meetingId, userId, accessToken) {
+    return request('morning_meetings', {
+      method:'DELETE',
+      accessToken,
+      query:{ id:`eq.${meetingId}`, user_id:`eq.${userId}`, select:'id' },
+      prefer:'return=representation'
+    });
+  }
+
+  return Object.freeze({
+    getDailyNote,
+    findIndicatorSymbols,
+    upsertDailyNote,
+    deleteDailyNote,
+    listMorningMeetings,
+    getMorningMeeting,
+    listMorningMeetingImages,
+    upsertMorningMeeting,
+    updateMorningMeeting,
+    replaceMorningMeetingImages,
+    deleteMorningMeeting
+  });
 }
 
 module.exports = { DATA_API_UNAVAILABLE, createSupabaseDataClient, isForbiddenAdminKey };
